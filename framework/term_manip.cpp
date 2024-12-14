@@ -1,6 +1,7 @@
 #include "term_manip.h"
 
 #include "smt-switch/utils.h"
+#include "smt-switch/substitution_walker.h"
 
 using namespace std;
 
@@ -103,5 +104,12 @@ smt::TermVec args(const smt::Term & term)
 
   return arg_vec;
 }
+
+smt::Term substitute(smt::SmtSolver & s, const smt::Term & t, const smt::UnorderedTermMap & map) {
+  smt::SubstitutionWalker walker(s, map);
+  auto tcopy = t;
+  return walker.visit(tcopy);
+}
+
 
 }  // namespace wasim

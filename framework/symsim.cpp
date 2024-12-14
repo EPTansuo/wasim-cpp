@@ -122,18 +122,29 @@ void SymbolicSimulator::init(
 {
   trace_.push_back(var_assignment);
 
+  const auto & init_val = ts_.init_constants();
+  
   auto & var_assignment_ref = trace_.back();
   for (const auto & v : svar_) {
-    if (var_assignment_ref.find(v) == var_assignment_ref.end()) {
-      var_assignment_ref[v] =
-          new_var(v->get_sort()->get_width(), v->to_string(), false);
+    if (init_val.find(v) != init_val.end()) {
+      if (var_assignment_ref.find(v) != var_assignment_ref.end()) {
+        std::cout << "Overriding constant initial value for " << v->to_string() << " : "
+                  << init_val.at(v)->to_string() << " -> " << var_assignment_ref.at(v)->to_string() << std::endl;
+      } else {
+        var_assignment_ref[v] = init_val.at(v);
+      }
+    } else {
+      if (var_assignment_ref.find(v) == var_assignment_ref.end()) {
+        var_assignment_ref[v] =
+            new_var(v->get_sort()->get_width(), v->to_string(), false);
+      }
     }
   }
 
   // make sure the init constraint only contains state variables
   // you cannot constrain input variables in the initial state
   // btorparser will help convert the TS to avoid this
-  _expr_only_sv(ts_.init());
+  assert( _expr_only_sv(ts_.init()) );
 
   auto init_constr = solver_->substitute(ts_.init(), var_assignment_ref);
   history_assumptions_.push_back({ init_constr });

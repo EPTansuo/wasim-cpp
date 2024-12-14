@@ -229,7 +229,7 @@ class TransitionSystem
   bool is_curr_var(const smt::Term & sv) const;
 
   /* @param sv the state variable to check
-   * @return true if sv is a next state variable
+   * @return true if sv is a next state variable / next input variable
    *
    * Returns false for any other term
    */
@@ -241,6 +241,13 @@ class TransitionSystem
    * Returns false for any other term
    */
   bool is_input_var(const smt::Term & t) const;
+
+  /* @param t the term to check
+   * @return true if t is a next input variable
+   *
+   * Returns false for any other term
+   */
+  bool is_next_input_var(const smt::Term & sv) const;
 
   /** Looks for a representative name for a term
    *  It searches for a name that was assigned to the term
@@ -270,7 +277,7 @@ class TransitionSystem
   /** Adds an input variable
    *  @param v the input variable
    */
-  void add_inputvar(const smt::Term & v);
+  void add_inputvar(const smt::Term & cv, const smt::Term & nv);
 
   // getters
   /* Returns const reference to solver */
@@ -299,6 +306,14 @@ class TransitionSystem
   const smt::UnorderedTermMap & state_updates() const
   {
     return state_updates_;
+  };
+
+  /* Returns the next state updates (xxx.next -> update)
+   * @return a map of functional next state updates
+   */
+  const smt::UnorderedTermMap & next_state_updates() const
+  {
+    return next_state_updates_;
   };
 
   /* @return the named terms mapping */
@@ -556,6 +571,9 @@ class TransitionSystem
   // system inputs
   smt::UnorderedTermSet inputvars_;
 
+  // system inputs
+  smt::UnorderedTermSet next_inputvars_;
+
   // mapping from names to terms
   std::unordered_map<std::string, smt::Term> named_terms_;
 
@@ -563,8 +581,11 @@ class TransitionSystem
   // because a term can have multiple names
   std::unordered_map<smt::Term, std::string> term_to_name_;
 
-  // next state update function
+  // next state update function cv --> update
   smt::UnorderedTermMap state_updates_;
+
+  // next state update function nv(.next) --> update
+  smt::UnorderedTermMap next_state_updates_;
 
   // maps states and inputs variables to next versions
   // note: the next state variables are only used

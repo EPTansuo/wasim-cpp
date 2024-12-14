@@ -146,7 +146,7 @@ smt::Term expr_simplify_ite(const smt::Term & expr,
                             const smt::TermVec & assumptions,
                             const smt::SmtSolver & solver)
 {
-  smt::UnorderedTermSet cond_set; // deduplicate (make sure we visit the same condition only once)
+  std::unordered_map<Term, int> cond_set; // deduplicate (make sure we visit the same condition only once)
   std::queue<smt::Term> que;
   que.push(expr);
   auto T = solver->make_term(1);
@@ -158,29 +158,49 @@ smt::Term expr_simplify_ite(const smt::Term & expr,
     if (node->get_op() == smt::Ite) {
       auto childern = args(node);
       auto cond = childern.at(0);
-      if (cond_set.find(cond) == cond_set.end()) {
+      auto cond_set_pos = cond_set.find(cond);
+      if (cond_set_pos == cond_set.end()) {
         auto reducible = is_reducible_bool(cond, assumptions, solver);
         if (reducible == 0) {
-          cond_set.insert(cond);
+          cond_set.emplace(cond, reducible);
           subst_map[cond] = F;
           que.push(childern.at(2));
         } else if (reducible == 1) {
-          cond_set.insert(cond);
+          cond_set.emplace(cond, reducible);
           subst_map[cond] = T;
           que.push(childern.at(1));
         } else {
           for (const auto & c : childern)
             que.push(c);
         } // end else not reducible
+      } else { // end if not cached in cond_set
+        auto reducible = cond_set_pos->second;
+        if(reducible == 0) {
+          que.push(childern.at(2));
+        } else if (reducible == 1) {
+          que.push(childern.at(1));
+        } else
+          assert(false);
       } // end if not cached in cond_set
-
+    } else if (node->get_sort()->get_sort_kind() == SortKind::BOOL || 
+            (node->get_sort()->get_sort_kind() == SortKind::BV && 
+             node->get_sort()->get_width() == 1 )) {
+      auto reducible = is_reducible_bool(node, assumptions, solver);
+      if (reducible == 0) {
+        subst_map[node] = F;
+      } else if (reducible == 1) {
+        subst_map[node] = T;
+      } else {
+        for (const auto & c : node)
+          que.push(c);
+      }
     } else {
       auto children =  args(node);
       for (const auto & c : children)
         que.push(c);
     }
   } // end of traversal of AST
-  return solver->substitute(expr, subst_map);
+  return solver->AbsSmtSolver::substitute(expr, subst_map);
 } // end of expr_simplify_ite
 
 void state_simplify_xvar(StateAsmpt & s,

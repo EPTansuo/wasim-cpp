@@ -5,22 +5,18 @@
 #include "sygus_simplify.h"
 #include "config/testpath.h"
 #include "utils/exceptions.h"
+#include "utils/subprocess.h"
 #include "frontend/smt_in.h"
+#include "framework/independence_check.h"
 
 #include "smt-switch/smt.h"
 #include "smt-switch/utils.h"
 #include "smt-switch/boolector_factory.h"
 #include "smt-switch/cvc5_factory.h"
 
-#include <time.h>
-#include <chrono>
 #include <fstream>
 #include <iostream>
 #include <string>
-#include <boost/asio.hpp>
-#include <boost/bind.hpp>
-#include <boost/process.hpp>
-#include <boost/process/async.hpp>
 
 
 namespace wasim {
@@ -32,103 +28,228 @@ using parsed_info = std::tuple<smt::UnorderedTermSet, // vars in expression
                                std::string>;          // sort string of the expression
 
 
-namespace bp = boost::process;
-class Process
-{
- public:
-  Process(const std::string & cmd, int timeout);
-  void run();
 
- private:
-  void timeout_handler(boost::system::error_code ec);
+smt::Term remove_independent_var(
+    const smt::Term & expr, 
+    const smt::Term & var,
+    const smt::TermVec & asmpts,
+    smt::SmtSolver & solver) {
+  // traverse the expr from bottom up, for subterm containing var, 
+  //  - build a vector of subterm, from v to this parent.
+  //  - there could be multiple occurrence of v
+  std::vector<smt::TermVec> parent_chains;
+  { // find parent_chains
+    std::vector<std::tuple<smt::Term, int, bool> > stack;
+    smt::UnorderedTermSet visited_terms;
+    stack.push_back({expr, -1, false});
+    
+    while(!stack.empty()) {
+      auto & [current, parentId, visited] = stack.back();
+      if (visited) {
+        visited_terms.insert(current);
+        stack.pop_back();
+        continue;
+      } // else
+      if (visited_terms.find(current) != visited_terms.end()) {
+        stack.pop_back();
+        continue;
+      } // else
 
-  const std::string command;
-  const int timeout;
+      visited = true;
+      if(current->is_symbolic_const()) {
+        if (current == var) {
+          // TODO: record the parent chain
+          smt::TermVec parent_chain;
+          parent_chain.push_back(current);
 
-  bool killed = false;
-  bool stopped = false;
+          int par_id = parentId;
+          while(par_id > 0) {
+            parent_chain.push_back(std::get<0>(stack.at(par_id)));
+            par_id = std::get<1>(stack.at(par_id));
+          }
+          parent_chains.push_back(std::move(parent_chain));
+        }
+      } else {
+        if (current->is_value()) // this guard is necessary
+          continue;              // because a value may still has its child in Boolector
+        int idx = stack.size()-1;
+        for (auto subterm_ : current) {
+          if (subterm_->is_value())
+            continue;
+          stack.push_back(std::tuple<smt::Term, int, bool>(subterm_, idx, false));
+        }
+      }
+    } // end of while (traverse)
+  } // end of find parent_chains
 
-  std::string stdOut;
-  std::string stdErr;
-  int returnStatus = 0;
+  // substition map
+  smt::UnorderedTermSet subterms;
+  for (const auto & chain : parent_chains) {
+    // for each chain, try to find a term that is independent of 
+    bool found = false;
+    assert(chain.size());
+    for (size_t idx = 0; idx < chain.size(); ++idx) {
+      const auto & t = chain.at(idx);
+      if (e_is_independent_of_v(t, var, asmpts)) {
+        found = true;
+        if (t->get_op().prim_op == smt::Ite) {
+          smt::TermVec children(t->begin(), t->end());
+          assert(idx > 0);
+          const auto & prev_term = chain.at(idx-1);
+          if (children.at(0) != prev_term) {
+            auto cnst = check_if_constant(children.at(0), asmpts, solver);
+            if (cnst) {
+              auto val = cnst->to_string();
+              if ( (val == "#b1" || val == "true" || val == "(_ bv1 1)") && (prev_term !=children.at(1) )) {
+                subterms.insert(children.at(0));
+                std::cout << "[WARNING] usually this should not happen. because simplify_ite is used first.\n";
+                break;
+              } else if ( (val == "#b0" || val == "false" || val == "(_ bv0 1)") && (prev_term !=children.at(2) )) {
+                subterms.insert(children.at(0));
+                std::cout << "[WARNING] usually this should not happen. because simplify_ite is used first.\n";
+                break;       
+              }
+            } else {
+              std::cout << "ITE is independent, but its COND is not!\n" ;
+              std::cout << "[WARNING] very likely SyGuS simplification will fail!\n";
+            }
+          }
+        }
+        subterms.insert(t);
+        break;
+      }
+    } // for each element in chain
+    if (!found)
+      throw SimulatorException("Cannot eliminate var: " + var->to_string() );
+  } // for each chain
 
-  boost::asio::io_service ios;
-  boost::process::group group;
-  boost::asio::deadline_timer deadline_timer;
-};
-
-Process::Process(const std::string & cmd, const int timeout)
-    : command(cmd), timeout(timeout), deadline_timer(ios)
-{
-}
-
-void Process::timeout_handler(boost::system::error_code ec)
-{
-  if (stopped) return;
-
-  if (ec == boost::asio::error::operation_aborted) return;
-
-  if (deadline_timer.expires_at()
-      <= boost::asio::deadline_timer::traits_type::now()) {
-    // std::cout << "Time Up!" << std::endl;
-    group.terminate();  // NOTE: anticipate errors
-    // std::cout << "Killed the process and all its decendants" << std::endl;
-    killed = true;
-    stopped = true;
-    deadline_timer.expires_at(boost::posix_time::pos_infin);
-  }
-  // NOTE: don't make it a loop
-  // deadline_timer.async_wait(boost::bind(&Process::timeout_handler, this,
-  // boost::asio::placeholders::error));
-}
-
-void Process::run()
-{
-  std::future<std::string> dataOut;
-  std::future<std::string> dataErr;
-
-  deadline_timer.expires_from_now(boost::posix_time::milliseconds(timeout));
-  deadline_timer.async_wait(boost::bind(
-      &Process::timeout_handler, this, boost::asio::placeholders::error));
-
-  bp::child c(command,
-              bp::std_in.close(),
-              bp::std_out > dataOut,
-              bp::std_err > dataErr,
-              ios,
-              group,
-              bp::on_exit([=](int e, std::error_code ec) {
-                // TODO handle errors
-                // std::cout << "on_exit: " << ec.message() << " -> " << e <<
-                // std::endl;
-                deadline_timer.cancel();
-                returnStatus = e;
-              }));
-
-  ios.run();
-
-  stdOut = dataOut.get();
-  stdErr = dataErr.get();
-
-  c.wait();
-
-  returnStatus = c.exit_code();
-}
-
-void run_cmd(const std::string & cmd_string, int timeout)
-{
-  Process p(cmd_string, timeout);
-  p.run();
-}
+  // at this point, we know the terms in subterms are reducible,
+  // then we can try different strategies
+  smt::UnorderedTermMap submap;
+  for (const auto & t : subterms) {
+    auto cnst = check_if_constant(t, asmpts, solver);
+    if (cnst) { // if it is a constant
+      submap.emplace(t, cnst);
+      continue;
+    } // if it is not a constant
+    // then we need to invoke SyGuS rewriting
+    auto simplified_term = sygus_simplify(t, var, asmpts, solver);
+    submap.emplace(t, simplified_term);
+  } // end of each subterm
+  
+  return solver->AbsSmtSolver::substitute(expr, submap);
+} // end of remove_independent_var
 
 
-static std::string GetTimeStamp()
-{
-  auto timeNow = chrono::duration_cast<chrono::milliseconds>(
-      chrono::system_clock::now().time_since_epoch());
-  long long timestamp = timeNow.count();
-  return std::to_string(timestamp);
-}
+smt::Term sygus_simplify(const smt::Term & t, const smt::Term & var_to_remove,
+                         const smt::TermVec & asmpts, smt::SmtSolver & solver) {
+
+  smt::SmtSolver solver_cvc5 = smt::Cvc5SolverFactory::create(false);
+  solver_cvc5->set_logic("QF_BV");
+  // solver_cvc5->set_opt("produce-models", "false");
+  // solver_cvc5->set_opt("incremental", "false");
+  smt::TermTranslator btor2cvc(solver_cvc5);
+  smt::TermTranslator cvc2btor(solver);
+
+  smt::TermVec assmpt_in_cvc;
+  for (const auto & a : asmpts)
+    assmpt_in_cvc.push_back(btor2cvc.transfer_term(a, smt::SortKind::BOOL));
+
+  smt::Term t_in_cvc = btor2cvc.transfer_term(t);
+  smt::Term var_in_cvc = btor2cvc.transfer_term(var_to_remove);
+
+  auto time_stamp = GetTimeStamp();
+  
+  auto template_file = "sygus_template_" + time_stamp + ".sygus";
+  auto bash_file = "sygus_" + time_stamp + ".sh";
+  auto result_file = "sygus_result_" + time_stamp + ".sygus";
+  auto result_temp_file = "sygus_result_temp_" + time_stamp + ".sygus";
+
+  { // collect SyGu-Synth dump
+    auto asmpt_and = assmpt_in_cvc.empty() ? solver_cvc5->make_term(true) :
+                     assmpt_in_cvc.size() < 2 ? assmpt_in_cvc.at(0) : solver_cvc5->make_term(smt::And, assmpt_in_cvc);
+    smt::UnorderedTermSet free_var_asmpt, free_var;
+    smt::get_free_symbols(asmpt_and, free_var_asmpt);
+    smt::get_free_symbols(t_in_cvc, free_var);
+    auto Fun_type = t_in_cvc->get_sort()->to_string();
+    const smt::Term & Fun = t_in_cvc;
+    // dump all files and run
+    { // dump template file
+      std::ofstream f(template_file);
+      f << "(set-logic BV)\n\n\n(synth-fun FunNew \n   (" << endl;
+
+      for (const auto & v_in_fun : free_var) {
+        if (v_in_fun != var_in_cvc) {
+          auto vdecl = "    (" + v_in_fun->to_string() + " "
+                       + v_in_fun->get_sort()->to_string() + " )";
+          f << vdecl << endl;          
+        }
+      } // end of v_in_fun declaration
+
+      f << "   )\n   " << Fun_type << "\n  )\n\n\n" << endl;
+
+      for (const auto & v_in_asmpt : free_var_asmpt) {
+        auto vdecl = "(declare-var " + v_in_asmpt->to_string() + " "
+                     + v_in_asmpt->get_sort()->to_string() + ")";
+        f << vdecl << endl;
+      } // end of v_in_asmpt
+
+      for (const auto & v_in_fun : free_var) {
+        if (free_var_asmpt.find(v_in_fun) == free_var_asmpt.end()) {
+          auto vdecl = "(declare-var " + v_in_fun->to_string() + " "
+                       + v_in_fun->get_sort()->to_string() + ")";
+          f << vdecl << endl;
+        }
+      } // end of remaining declaration
+
+      f << "\n(constraint (=> " << endl;
+      f << "    " << asmpt_and->to_string() << " ;\n\n    (=" << endl;
+      f << "        " << Fun->to_string() << " ;\n        (FunNew ";
+
+      for (const auto & v_in_fun : free_var) {
+        if (v_in_fun != var_in_cvc) {
+          auto line8 = v_in_fun->to_string() + " ";
+          f << line8;
+        }
+      }
+      f << ") ;\n    )))\n\n\n;\n\n(check-synth)" << endl;
+    } // end of template writing
+    { // write bash script
+      std::ofstream bash_f(bash_file);
+
+      bash_f <<  "#!/bin/bash" << endl;
+      auto bash_line2 = (PROJECT_SOURCE_DIR "/deps/smt-switch/deps/cvc5-Linux-static/bin/cvc5 --lang=sygus2 ") 
+                        + template_file
+                        + " > " + result_temp_file;
+      bash_f << bash_line2 << endl;
+    } // finish writing bash script
+
+    auto cmd = "chmod +x " + bash_file;
+    system(cmd.c_str());
+    run_cmd("./" + bash_file, 1000);
+  } // end of dump SyGuS templates
+  { // load sygus output
+    // only move the second line of sygus output file to a new file
+
+    std::string linedata;
+    { // read the result file
+      std::ifstream infile(result_temp_file);
+      getline(infile, linedata);  // get first line, and do nothing
+      getline(infile, linedata);  // get second line
+    }
+    if (linedata.empty())
+      throw SimulatorException("SyGuS rewriting failed");
+
+    { // dump to the final result file
+      std::ofstream outfile(result_file);
+      outfile << linedata << endl;
+    }
+    auto new_expr = load_smt_fundef(result_file, solver_cvc5);
+    return cvc2btor.transfer_term(new_expr);
+  } // end of loading SyGuS result
+} // end of sygus_simplify
+
+
 
 static parsed_info parse_state(const smt::TermVec & asmpt, const smt::Term & v, const smt::SmtSolver & solver)
 {
@@ -251,8 +372,7 @@ smt::Term run_sygus(const parsed_info & info,
     }
   } else {
     auto solver_copy = solver; // TODO: in the future, change SmtLibReader to use const ref.
-    WasimSmtLib2Parser pi(result_file, solver_copy);
-    new_expr = pi.return_defs();
+    new_expr = load_smt_fundef(result_file, solver_copy);
   }
   int rm;
   // rm = remove(template_file.c_str());

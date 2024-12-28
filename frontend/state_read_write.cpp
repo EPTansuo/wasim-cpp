@@ -56,8 +56,7 @@ smt::Term StateRW::read_expr(std::ifstream & fin) {
     throw SimulatorException("unable to open file for write " + temp_file); 
   temp << linedata << endl;
 
-  WasimSmtLib2Parser pi(temp_file, solver_);
-  return pi.return_defs();
+  return load_smt_fundef(temp_file, solver_);
 }
 
 

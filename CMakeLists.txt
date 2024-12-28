@@ -132,6 +132,7 @@ set(SOURCES
     "${PROJECT_SOURCE_DIR}/framework/sygus_simplify.cpp"
     "${PROJECT_SOURCE_DIR}/framework/state_simplify.cpp"
     "${PROJECT_SOURCE_DIR}/utils/logger.cpp"
+    "${PROJECT_SOURCE_DIR}/utils/subprocess.cpp"
 )
 
 
@@ -255,6 +256,10 @@ target_link_libraries(test1 wasim-lib)
 
 add_executable(pipe_forward "apps/pipe_forward.cpp")
 target_link_libraries(pipe_forward wasim-lib)
+
+
+add_executable(pipe "apps/pipe.cpp")
+target_link_libraries(pipe wasim-lib)
 
 # add_executable(independence_check_test "independence_check_test.cpp")
 # target_link_libraries(independence_check_test wasim)

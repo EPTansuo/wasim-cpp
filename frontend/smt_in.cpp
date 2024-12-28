@@ -1,9 +1,29 @@
 #include <frontend/smt_in.h>
 #include <utils/exceptions.h>
 
+#include "smt-switch/smtlib_reader.h"
+
 namespace wasim
 {
   
+class WasimSmtLib2Parser : public smt::SmtLibReader
+{
+ public:
+  WasimSmtLib2Parser(const std::string & filename, smt::SmtSolver & solver);
+
+  typedef SmtLibReader super;
+
+  smt::Term return_defs();
+
+ protected:
+  // overloaded function, used when arg list of function is parsed
+  // NOTE: | |  pipe quotes are removed.
+  virtual smt::Term register_arg(const std::string & name,
+                                 const smt::Sort & sort) override;
+
+  std::string filename_;
+};
+
 WasimSmtLib2Parser::WasimSmtLib2Parser(const std::string & filename,
                                      smt::SmtSolver & solver)
     : super(solver), filename_(filename)
@@ -40,5 +60,9 @@ smt::Term WasimSmtLib2Parser::return_defs()
   return NULL;
 }
 
+smt::Term load_smt_fundef(const std::string & filename, smt::SmtSolver & solver) {
+  WasimSmtLib2Parser pi(filename, solver);
+  return pi.return_defs();
+}
 
 } // namespace wasim

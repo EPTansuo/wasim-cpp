@@ -38,4 +38,7 @@ smt::TermVec args(const smt::Term & term);
 
 smt::Term substitute(smt::SmtSolver & s, const smt::Term & t, const smt::UnorderedTermMap & map);
 
+smt::Term UniversalQuantification(const smt::Term & in, const smt::TermVec & vars_to_quantify, smt::SmtSolver & slv);
+smt::Term ExistentialQuantification(const smt::Term & in, const smt::TermVec & vars_to_quantify, smt::SmtSolver & slv);
+
 }  // namespace wasim

@@ -8,14 +8,21 @@ using namespace std;
 
 namespace wasim {
 
-// will attempt to simplify (remove the set of xvar)
-// it is better if you can first use independence check to find a set of
-// xvar that can be simplified
-//   namely: state_simplify.h / get_xvar_independent
-smt::Term sygus_simplify_expr(
+// will attempt to simplify (remove the variable)
+// it is better if you can first use independence check to find if it is removable
+//   e.g., state_simplify.h / get_xvar_independent
+
+smt::Term remove_independent_var(
     const smt::Term & expr, 
-    const smt::UnorderedTermSet & set_of_xvar_btor,
+    const smt::Term & var,
+    const smt::TermVec & asmpts,
     smt::SmtSolver & solver);
+
+// call sygus to try removing var_to_remove from t
+// it is better not to directly use it
+// (use remove_independent_var instead)
+smt::Term sygus_simplify(const smt::Term & t, const smt::Term & var_to_remove,
+                         const smt::TermVec & asmpts, smt::SmtSolver & solver);
 
 // attempt to simplify the variable assigments in state_btor
 // assuming all expressions in state_btor are in solver btor

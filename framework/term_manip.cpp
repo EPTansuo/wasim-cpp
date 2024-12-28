@@ -111,5 +111,113 @@ smt::Term substitute(smt::SmtSolver & s, const smt::Term & t, const smt::Unorder
   return walker.visit(tcopy);
 }
 
+smt::Term ExistentialQuantification(const smt::Term & in, const smt::TermVec & vars_to_quantify, smt::SmtSolver & slv) {
+  if (vars_to_quantify.empty()) {
+    std::cout << "[ExistentialQuantification] nothing to quantify." << std::endl;
+    return in;
+  }
+  std::vector<int> vals;
+  for(const auto & v : vars_to_quantify) {
+    std::cout << "[ExistentialQuantification] forall: " << v->to_string() << std::endl;
+    vals.push_back(0);
+  }
+  
+  smt::Term ret;
+
+  while(true) {
+    // generate one assignment
+    // substitution
+    // move to next
+    //    if you cannot find the next
+    //    then break
+    
+    smt::UnorderedTermMap var_val_map;
+    for (int i = 0; i < vals.size(); ++i) {
+      auto var = vars_to_quantify.at(i);
+      auto sort = var->get_sort();
+      auto val = slv->make_term(vals.at(i), sort);
+      var_val_map.emplace(vars_to_quantify.at(i),val);
+    }
+    auto t = substitute(slv, in, var_val_map);
+
+    if (ret)
+      t = slv->make_term(smt::Or, t, ret);
+    else
+      ret = t;
+
+    bool succ = false;
+    for(int i = vals.size() - 1; i >=0; --i) {
+      vals.at(i) ++;
+      auto s = vars_to_quantify.at(i)->get_sort();
+      unsigned width = s->get_sort_kind() == smt::SortKind::BOOL ? 1 : s->get_width();
+      assert(width < 64);
+      auto maxval = 1 << width;
+      if (vals.at(i) != maxval) {
+        succ = true;
+        break;
+      } // else
+      vals.at(i) = 0; // then move to next
+    }
+    if (!succ)
+      break;
+  } // end of while
+  assert(ret);
+  return ret;
+} // UniversalInputQuantification
+
+smt::Term UniversalQuantification(const smt::Term & in, const smt::TermVec & vars_to_quantify, smt::SmtSolver & slv) {
+  if (vars_to_quantify.empty()) {
+    std::cout << "[UniversalQuantification] nothing to quantify." << std::endl;
+    return in;
+  }
+  std::vector<int> vals;
+  for(const auto & v : vars_to_quantify) {
+    std::cout << "[UniversalQuantification] forall: " << v->to_string() << std::endl;
+    vals.push_back(0);
+  }
+  
+  smt::Term ret;
+
+  while(true) {
+    // generate one assignment
+    // substitution
+    // move to next
+    //    if you cannot find the next
+    //    then break
+    
+    smt::UnorderedTermMap var_val_map;
+    for (int i = 0; i < vals.size(); ++i) {
+      auto var = vars_to_quantify.at(i);
+      auto sort = var->get_sort();
+      auto val = slv->make_term(vals.at(i), sort);
+      var_val_map.emplace(vars_to_quantify.at(i),val);
+    }
+    auto t = substitute(slv, in, var_val_map);
+
+    if (ret)
+      t = slv->make_term(smt::And, t, ret);
+    else
+      ret = t;
+
+    bool succ = false;
+    for(int i = vals.size() - 1; i >=0; --i) {
+      vals.at(i) ++;
+      auto s = vars_to_quantify.at(i)->get_sort();
+      unsigned width = s->get_sort_kind() == smt::SortKind::BOOL ? 1 : s->get_width();
+      assert(width < 64);
+      auto maxval = 1 << width;
+      if (vals.at(i) != maxval) {
+        succ = true;
+        break;
+      } // else
+      vals.at(i) = 0; // then move to next
+    }
+    if (!succ)
+      break;
+  } // end of while
+  assert(ret);
+  return ret;
+} // UniversalInputQuantification
+
 
 }  // namespace wasim

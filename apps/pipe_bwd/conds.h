@@ -42,10 +42,16 @@ struct Conds{
       // TODO: input variables?
       // TODO: think about this :  should be before this state
       nexpr = expr_simplify_ite(nexpr, assumptions, solver);
+      // conjunction participation
+      smt::TermVec parted;
+      smt::conjunctive_partition(nexpr, parted, true);
+
       // todo: add xxx == 0 --> replace ...
-      nvec.push_back(nexpr);
+      for (const auto & e : parted)
+        nvec.push_back(e);
     } // for each cond in 
-    
+
+    // TODO : you may want to distruct bvand and and
     ret.simplify_inputvar_foreach_constraint(assumptions);
 
     std::cout << "[backward] post-check:" << std::endl;
@@ -94,21 +100,43 @@ struct Conds{
       smt::TermVec all_asmpt(asmpt);
       for (const auto & c_rest : conds) {
         if (c_rest != c) 
-          all_asmpt.push_back(c_rest);
+          all_asmpt.push_back(c_rest); // note here, after prior simplification, later onces will change as well
       }
       
       smt::UnorderedTermSet vars;
-      get_free_symbols(c,vars);
-      
-      for (const auto & v : vars)
-        if(s.is_input_var(v)) {
-          if (e_is_independent_of_v(c, v, all_asmpt)) {
-            std::cout << "[simplify_input] try to remove: " << v->to_string() << std::endl;
-            std::cout << "[simplify_input] in: " << c->to_string() << std::endl;
-            // now we should simplify
-            c = remove_independent_var(c, v, all_asmpt, solver);
-          }
-      } // end of for each var
+      smt::get_free_symbols(c,vars);
+      // TODO: you may want to replace for all ...
+      unsigned round = 0;
+      bool need_to_remove = true;
+      while(need_to_remove) {
+        // for each var remove it
+        need_to_remove = false;
+        for (const auto & v : vars)
+          if(s.is_input_var(v)) {
+            if (e_is_independent_of_v(c, v, all_asmpt)) {
+              need_to_remove = true; // remember to do next round
+              std::cout << "[simplify_input] try to remove: " << v->to_string() << std::endl;
+              std::cout << "[simplify_input] in: " << c->to_string() << std::endl;
+              // now we should simplify
+              c = remove_independent_var(c, v, all_asmpt, solver);
+
+              smt::UnorderedTermSet tmp_varset;
+              smt::get_free_symbols(c, tmp_varset);
+              if (tmp_varset.find(v) != tmp_varset.end()) {
+                std::cout << "[DEBUG] "  << c->to_string() << std::endl;
+                throw SimulatorException("ERROR: not removed: var " + v->to_string());
+              }
+            }
+        } // end of for each var
+        if (round >= 1 && need_to_remove) {
+          // if we going next round
+          std::cout << "[simplify_input] round: " << round << std::endl;
+        }
+        vars.clear();
+        smt::get_free_symbols(c, vars);
+        ++ round;
+      } // end of while vars unchanged
+
     } // end of for each c in conds
   } // simplify_inputvar_foreach_constraint
 

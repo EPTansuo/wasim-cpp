@@ -140,11 +140,11 @@ int main() {
 
   IdExState.simplify_using_mutual_asmpt(); // HZ there are input variables that you cannot avoid...
   IdExState.print();
-  // IdExState.add(Eq(Sel(Sv("id_ex_inst"),7,6), 1));
+  IdExState.add(Eq(Sel(Sv("id_ex_inst"),7,6), 1));
 
-  // std::cout << "Check:"<< IdExState.check( Eq(Sv("id_go"), 0), { Eq(Sv("ex_go"), 0), Eq(Sv("rst"), 0)}  ) << std::endl;
+  // ex_go ==0 /\ rst == 0 |-> id_go == 0
+  std::cout << "Check:"<< IdExState.check( Eq(Sv("id_go"), 0), { Eq(Sv("ex_go"), 0), Eq(Sv("rst"), 0)}  ) << std::endl;
 
-#if 0
 
   TermVec failed_constraints;
   // check if we start from pre-state with assumptions, are we guaranteed to end in a state satisfiying post-conditon
@@ -156,19 +156,21 @@ int main() {
     for (const auto & v : inputv)
       std::cout << "Semantically depends on " << v->to_string() << std::endl;
   }
+
+  auto IfIdState = IdExState.backward({Eq(Sv("id_go"),1), Eq(Sv("rst"), 0)});
+  IfIdState.print();
   // TODO : semantically removing independent input vars
 
   // find the leaf that 
   // TODO: compute fixedpoint under { Eq(Sv("ex_go"), 0), Eq(Sv("rst"), 0)}
   // check that fixed point guarantees { Eq(Sv("ex_go"), 1), Eq(Sv("rst"), 0)}     LastState
-  auto IdExStateFixedpoint = IdExState.compute_fixedpoint({ Eq(Sv("ex_go"), 0), Eq(Sv("rst"), 0)});
+  // auto IdExStateFixedpoint = IdExState.compute_fixedpoint({ Eq(Sv("ex_go"), 0), Eq(Sv("rst"), 0)});
 
-  TermVec failed_constraints2;
-  TransCheck(IdExStateFixedpoint,  { Eq(Sv("ex_go"), 1), Eq(Sv("rst"), 0)}, LastState, &failed_constraints2);
-  assert(failed_constraints2.empty());
+  // TermVec failed_constraints2;
+  // TransCheck(IdExStateFixedpoint,  { Eq(Sv("ex_go"), 1), Eq(Sv("rst"), 0)}, LastState, &failed_constraints2);
+  // assert(failed_constraints2.empty());
 
   exit(1);
-#endif
 
 #if 0  
   auto IdExHoldState = IdExState.backward({ Eq(Sv("ex_go"), 0), Eq(Sv("rst"), 0)});
@@ -187,54 +189,6 @@ int main() {
   IdExState.backward({Eq(Sv("id_go"),1), Eq(Sv("rst"), 0)});
   IdExState.print();
 #endif
-
-  // add the requirement in, and forall quantified input, and check again?
-
-  // SecondLastState --> Eq(Sv("ex_go"), 0) -->  LastState ?
-
-
-  // std::cout << "-----------------------\n" ;
-  // //                                   |->
-  // LastState.backward({Eq(Sv("wb_go"), 0), Eq(Sv("ex_go"), 0), Eq(Sv("rst"), 0)});
-  // LastState.print();
-
-
-
-  // auto varmap = sim.convert( { {"wen_stage2","v"}, {"tag2", 1} } );
-
-  // sim.init();
-
-  // auto s = sim.get_curr_state();
-
-  // std::cout << s.print() ;
-  // std::cout << s.print_assumptions();
-
-  // auto inputmap_cycle0 = sim.convert( {{"rst",0}, {"stallex", 0},{"stallwb", 0}, {"inst_valid", "1"}} );
-  // auto inputmap = sim.convert( {{"rst",0}, {"stallex", 0},{"stallwb", 0}} );
-
-  // sim.set_input(inputmap_cycle0, {});
-  // sim.sim_one_step();
-  // sim.print_current_step();
-  // sim.print_current_step_assumptions();
-
-
-  // sim.set_input(inputmap, {});
-  // sim.sim_one_step();
-  // sim.print_current_step();
-  // sim.print_current_step_assumptions();
-
-
-  // sim.set_input(inputmap, {});
-  // sim.sim_one_step();
-  // sim.print_current_step();
-  // sim.print_current_step_assumptions();
-
-  // auto s2 = sim.get_curr_state();
-  // std::cout << s2.print();
-  // std::cout << s2.print_assumptions();
-
-  // sim.backtrack();
-  // sim.undo_set_input();
 
 
   return 0;

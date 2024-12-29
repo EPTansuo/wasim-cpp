@@ -1,6 +1,7 @@
 #include "independence_check.h"
 
 #include "smt-switch/boolector_factory.h"
+#include "smt-switch/utils.h"
 
 namespace wasim {
 // TODO: need to distinguish constant and op?
@@ -130,6 +131,68 @@ bool e_is_independent_of_v(const smt::Term & e,
   localSolver->pop();
 
   return r.is_unsat();
-}
+} // end of e_is_independent_of_v
+
+
+bool get_unsatcore_for_e_is_independent_of_v(const smt::Term & e,
+                           const smt::Term & v,
+                           const smt::TermVec & assumptions,
+                           smt::TermVec & out) {
+
+  auto localSolver = smt::BoolectorSolverFactory::create(false);
+  localSolver->set_logic("QF_UFBV");
+  localSolver->set_opt("incremental", "true");
+  localSolver->set_opt("produce-models", "true");
+  localSolver->set_opt("produce-unsat-assumptions", "true");
+  smt::TermTranslator translator(localSolver);
+
+  auto e_local = translator.transfer_term(e);
+  auto v_local = translator.transfer_term(v);
+
+  auto w = v_local->get_sort()->get_width();
+  auto sort_w = localSolver->make_sort(smt::BV, w);
+
+  // I think we should never use get_symbol in this function
+  // if it succeeds, it means there has been such a variable (maybe already in
+  // use) but we want a fresh one, which does not interfere with the
+  // constraints!
+  smt::Term v1 = try_get_fresh_variable_in_a_solver(
+      v_local->to_string(), "1", sort_w, localSolver);
+  smt::Term v2 = try_get_fresh_variable_in_a_solver(
+      v_local->to_string(), "2", sort_w, localSolver);
+
+  smt::UnorderedTermMap sub_map1, sub_map2;
+  sub_map1 = { { v_local, v1 } };
+  sub_map2 = { { v_local, v2 } };
+  auto e1 = localSolver->substitute(e_local, sub_map1);
+  auto e2 = localSolver->substitute(e_local, sub_map2);
+
+  auto e1_neq_e2 = localSolver->make_term(
+      smt::Not, localSolver->make_term(smt::Equal, e1, e2));
+  localSolver->push();
+
+  smt::TermVec asmpts_transfered, reduced1, reduced2;
+
+  for (const auto & a : assumptions) {
+    auto a_local = translator.transfer_term(a);
+    asmpts_transfered.push_back(localSolver->substitute(a_local, sub_map1));
+    asmpts_transfered.push_back(localSolver->substitute(a_local, sub_map2));
+  }
+
+  smt::UnsatCoreReducer reducer(localSolver);
+  bool res = reducer.reduce_assump_unsatcore(e1_neq_e2, asmpts_transfered, reduced1);
+  if(!res)
+    return false;
+  res = reducer.linear_reduce_assump_unsatcore(e1_neq_e2, reduced1, reduced2);
+  assert(res);
+  // now for each element in out2, find its corresponding one in asmpts_transfered, 
+  for (const auto & a : reduced2) {
+    auto pos = std::find(asmpts_transfered.begin(), asmpts_transfered.end(), a);
+    assert(pos != asmpts_transfered.end());
+    auto idx = (pos - asmpts_transfered.begin()) / 2;
+    out.push_back(assumptions.at(idx));
+  }
+  return true;
+}  // end of get_unsatcore_for_e_is_independent_of_v
 
 }  // namespace wasim

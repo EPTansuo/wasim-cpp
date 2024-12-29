@@ -44,6 +44,12 @@ bool e_is_independent_of_v(const smt::Term & e,
                            const smt::Term & v,
                            const smt::TermVec & assumptions); 
 
+// return true if succeed
+bool get_unsatcore_for_e_is_independent_of_v(const smt::Term & e,
+                           const smt::Term & v,
+                           const smt::TermVec & assumptions,
+                           smt::TermVec & out); 
+
   // HZ: the reason for making a new solver is because I want to make the
   // context of the original solver clear from the new variables we created
   // locally in this function I was hoping push/pop can be used to create

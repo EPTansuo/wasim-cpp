@@ -27,7 +27,7 @@ using parsed_info = std::tuple<smt::UnorderedTermSet, // vars in expression
                                smt::Term,             // the expression to simplify
                                std::string>;          // sort string of the expression
 
-
+static smt::Term quantify_away(const smt::Term & t, const smt::Term & var, const smt::TermVec & asmpts, smt::SmtSolver & solver) ;
 
 smt::Term remove_independent_var(
     const smt::Term & expr, 
@@ -46,7 +46,8 @@ smt::Term remove_independent_var(
     while(!stack.empty()) {
       auto & [current, parentId, visited] = stack.back();
       if (visited) {
-        visited_terms.insert(current);
+        if (!current->is_symbol()) // should not add symbol to visited
+          visited_terms.insert(current); // o.w. will miss the multi occurrence of the same var
         stack.pop_back();
         continue;
       } // else
@@ -81,6 +82,7 @@ smt::Term remove_independent_var(
       }
     } // end of while (traverse)
   } // end of find parent_chains
+  std::cout << "[DEBUG] #. parent chains: " << parent_chains.size() << "\n";
 
   // substition map
   smt::UnorderedTermSet subterms;
@@ -102,16 +104,18 @@ smt::Term remove_independent_var(
               auto val = cnst->to_string();
               if ( (val == "#b1" || val == "true" || val == "(_ bv1 1)") && (prev_term !=children.at(1) )) {
                 subterms.insert(children.at(0));
-                std::cout << "[WARNING] usually this should not happen. because simplify_ite is used first.\n";
+                // std::cout << "[WARNING] usually this should not happen. because simplify_ite is used first.\n";
+                throw SimulatorException("[WARNING] usually this should not happen. because simplify_ite is used first.");
                 break;
               } else if ( (val == "#b0" || val == "false" || val == "(_ bv0 1)") && (prev_term !=children.at(2) )) {
                 subterms.insert(children.at(0));
-                std::cout << "[WARNING] usually this should not happen. because simplify_ite is used first.\n";
+                // std::cout << "[WARNING] usually this should not happen. because simplify_ite is used first.\n";
+                throw SimulatorException("[WARNING] usually this should not happen. because simplify_ite is used first.");
                 break;       
               }
             } else {
               std::cout << "ITE is independent, but its COND is not!\n" ;
-              std::cout << "[WARNING] very likely SyGuS simplification will fail!\n";
+              std::cout << "[WARNING] very likely SyGuS rewriting will fail!\n";
             }
           }
         }
@@ -122,24 +126,193 @@ smt::Term remove_independent_var(
     if (!found)
       throw SimulatorException("Cannot eliminate var: " + var->to_string() );
   } // for each chain
+  #error rank subterms according to their sizes
+  // rewrite from smallest to largest
+  // rewrite immediately, instead of having a map
+
+  // and remember to rewrite the later terms as well as the 
 
   // at this point, we know the terms in subterms are reducible,
   // then we can try different strategies
   smt::UnorderedTermMap submap;
   for (const auto & t : subterms) {
+    if (submap.find(t) != submap.end())  {
+      std::cout << "[DEBUG] multiple chains" << std::endl;
+      continue; // no need to recompute...
+    }
+    // |  this could happen if multiple chains end up with the same node
     auto cnst = check_if_constant(t, asmpts, solver);
     if (cnst) { // if it is a constant
       submap.emplace(t, cnst);
+      std::cout << "[STRATEGY] tied to constant" << std::endl;
       continue;
     } // if it is not a constant
     // then we need to invoke SyGuS rewriting
     auto simplified_term = sygus_simplify(t, var, asmpts, solver);
-    submap.emplace(t, simplified_term);
+    if (simplified_term) { // sygus succeeded
+      submap.emplace(t, simplified_term);
+      continue;
+    } // else: continue with other methods
+    if ( (var->get_sort()->get_sort_kind() == smt::BOOL ||
+         (var->get_sort()->get_sort_kind() == smt::BV &&
+            var->get_sort()->get_width() <= 4  ))  // 2-bit var is also okay
+        ) {
+      smt::TermVec related_asmpts;
+      bool res = get_unsatcore_for_e_is_independent_of_v(t, var, asmpts, related_asmpts);
+      assert(res);
+      std::cout << "[remove var] try to quantify v: " << var->to_string() << std::endl;
+      auto reduced_form = quantify_away(t, var, related_asmpts, solver);
+      submap.emplace(t, reduced_form);
+      std::cout << "--- BEFORE: " << t->to_string() << std::endl;
+      std::cout << "--- AFTER: " << reduced_form->to_string() << std::endl;
+      std::cout << "[STRATEGY] Quantified." << std::endl;
+      continue;
+    }
+    throw SimulatorException("Cannot eliminate var: " + var->to_string());
+    // replace 
   } // end of each subterm
   
-  return solver->AbsSmtSolver::substitute(expr, submap);
+  return replacement_and_constant_propagation(expr, submap, solver);
 } // end of remove_independent_var
 
+static smt::Term smart_and(const smt::TermVec & asmpts, smt::SmtSolver & solver) {
+  if (asmpts.empty())
+    return solver->make_term(true);
+  if (asmpts.size() == 1)
+    return asmpts.at(0);
+  return solver->make_term(smt::And, asmpts);
+} // end of smart_and
+
+static smt::Term build_ite(const smt::TermVec & conds, const smt::TermVec & choices, smt::SmtSolver & solver) {
+  assert(choices.size()); // non-empty
+  assert(conds.size() == choices.size());
+
+  if (choices.size() == 1)
+    return choices.at(0);
+  auto ret = choices.back(); // the last element
+  for (int ptr = conds.size() - 2; ptr >= 0; --ptr) {
+    const auto & if_branch = choices.at(ptr);
+    ret = solver->make_term(smt::Ite, conds.at(ptr), if_branch, ret);
+  }
+  return ret;
+}
+
+static smt::Term quantify_away(const smt::Term & t, const smt::Term & var, const smt::TermVec & asmpts, smt::SmtSolver & solver) {
+  // ((asmpts | var = 0) : a1 => t1 | var = 0
+  // ((asmpts | var = 1) : a2 => t2 | var = 1
+  // check if (asmpts /\ not(a1) /\ not(a2) ) is sat?
+  auto asmpt_all = smart_and(asmpts, solver);
+  smt::TermVec asmpt_under_diff_val;
+  smt::TermVec t_under_diff_val;
+  if (var->get_sort()->get_sort_kind() == smt::BOOL) {
+    auto T = solver->make_term(true);
+    auto F = solver->make_term(false);
+    asmpt_under_diff_val.push_back(replacement_and_constant_propagation(asmpt_all, { {var, T} }, solver));
+    asmpt_under_diff_val.push_back(replacement_and_constant_propagation(asmpt_all, { {var, F} }, solver));
+    t_under_diff_val.push_back(replacement_and_constant_propagation(t, { {var, T} }, solver));
+    t_under_diff_val.push_back(replacement_and_constant_propagation(t, { {var, F} }, solver));
+  } else {
+    // enum BV values
+    auto bvsort = var->get_sort();
+    auto width = bvsort->get_width();
+    auto uplimit = 1ULL << width;
+    for (int val = 0 ; val < uplimit; ++ val) {
+      auto term_val = solver->make_term(val, bvsort);
+      asmpt_under_diff_val.push_back(replacement_and_constant_propagation(asmpt_all, { {var, term_val} }, solver));
+      t_under_diff_val.push_back(replacement_and_constant_propagation(t, { {var, term_val} }, solver));
+    }
+  }
+  // check asmpt_under_diff_val is complete under the assumptions
+  solver->push();
+  solver->assert_formula(asmpt_all);
+  for(const auto & a : asmpt_under_diff_val)
+    solver->assert_formula(solver->make_term(smt::Not, a));
+  auto res = solver->check_sat();
+  solver->pop();
+  assert(res.is_unsat());
+  auto ret = build_ite(asmpt_under_diff_val, t_under_diff_val, solver);
+  return replacement_and_constant_propagation(ret, {}, solver);
+} // end of quantify_away
+
+// note: the last element in conds will be ignored
+static smt::Term rebuild_ite(const smt::Term & var, const smt::TermVec & conds, const smt::TermVec & choices, smt::SmtSolver & solver) {
+  assert(choices.size()); // non-empty
+  assert(conds.size() == choices.size());
+
+  if (choices.size() == 1)
+    return choices.at(0);
+  auto ret = choices.back(); // the last element
+  for (int ptr = conds.size() - 2; ptr >= 0; --ptr) {
+    const auto & if_branch = choices.at(ptr);
+    const auto & val = conds.at(ptr);
+    ret = solver->make_term(smt::Ite,
+      solver->make_term(smt::Equal, var, val),
+      if_branch, ret);
+  }
+  return ret;
+} // end of rebuild_ite
+
+// find the (ite x == 1, ite , ite ...)
+static smt::Term try_fullcase_remove_default(const smt::Term & t, smt::SmtSolver & solver) {
+#define MISMATCH  { mismatch = true; break;  } 
+  if (t->get_op().prim_op != smt::Ite)
+    return t;
+  // peel the layered ite
+  bool mismatch = false;
+  smt::Term eq_term;
+  smt::TermVec eq_consts;
+  smt::TermVec choices;
+  auto current = t;
+  while(current->get_op().prim_op == smt::Ite) {
+    auto child_pos = current->begin();
+    auto cond = *child_pos;
+    if (cond->get_op().prim_op != smt::Equal) MISMATCH
+    // from this point on, it should be equal
+    smt::TermVec eq_child(cond->begin(),cond->end());
+    if (eq_child.size() != 2) MISMATCH
+    if (! (eq_child.at(0)->is_value()) && ! (eq_child.at(1)->is_value())) MISMATCH
+    if (eq_child.at(0)->is_value()) {
+      auto eq_term_new = eq_child.at(1);
+      if (eq_term != nullptr && eq_term != eq_term_new) MISMATCH
+      if (eq_term == nullptr)
+        eq_term = eq_term_new;
+      eq_consts.push_back(eq_child.at(0));
+    } else { // eq_child.at(1)->is_value()
+      auto eq_term_new = eq_child.at(0);
+      if (eq_term != nullptr && eq_term != eq_term_new) MISMATCH
+      if (eq_term == nullptr)
+        eq_term = eq_term_new;
+      eq_consts.push_back(eq_child.at(1));
+    }
+    ++child_pos; // then-branch
+    choices.push_back(*child_pos);
+
+    ++child_pos; // else-branch
+    current = *child_pos;
+  } // end of peel layered ITE
+  if (mismatch)
+    return t;
+  auto term_sort = eq_term->get_sort();
+  if (term_sort->get_sort_kind() != smt::SortKind::BV)
+    return t; // not handled
+  auto elem = 1ULL << (term_sort->get_width());
+  if (eq_consts.size() != elem)
+    return t; // not full case
+  std::vector<bool> all_value_exists(elem, false);
+  for (const auto & c : eq_consts) {
+    auto val = c->to_int();
+    if (val >= elem)
+      return t;
+    all_value_exists.at(val) = true;
+  }
+  for (const auto exists : all_value_exists)
+    if (!exists)
+      return t; // not fully covered
+  // now we are sure, all cases are covered
+  // so we can rebuild ITE
+  return rebuild_ite(eq_term, eq_consts, choices, solver);
+#undef MISMATCH
+}
 
 smt::Term sygus_simplify(const smt::Term & t, const smt::Term & var_to_remove,
                          const smt::TermVec & asmpts, smt::SmtSolver & solver) {
@@ -157,6 +330,19 @@ smt::Term sygus_simplify(const smt::Term & t, const smt::Term & var_to_remove,
 
   smt::Term t_in_cvc = btor2cvc.transfer_term(t);
   smt::Term var_in_cvc = btor2cvc.transfer_term(var_to_remove);
+
+  { // lets first try some strategies
+    if(t_in_cvc->get_op().prim_op == smt::Ite) {
+      auto ret = try_fullcase_remove_default(t_in_cvc, solver_cvc5);
+      smt::UnorderedTermSet vars;
+      smt::get_free_symbols(ret, vars);
+      if (vars.find(var_in_cvc) == vars.end() ) {
+        std::cout << "[STRATEGY] ITE full case removable" << std::endl;
+        // if succcefully removed
+        return cvc2btor.transfer_term(ret);
+      }
+    }
+  } // end of strategies
 
   auto time_stamp = GetTimeStamp();
   
@@ -237,13 +423,16 @@ smt::Term sygus_simplify(const smt::Term & t, const smt::Term & var_to_remove,
       getline(infile, linedata);  // get first line, and do nothing
       getline(infile, linedata);  // get second line
     }
-    if (linedata.empty())
-      throw SimulatorException("SyGuS rewriting failed");
+    if (linedata.empty()) {
+      std::cout << "SyGuS rewriting failed!" << std::endl;
+      return nullptr;
+    }
 
     { // dump to the final result file
       std::ofstream outfile(result_file);
       outfile << linedata << endl;
     }
+    std::cout << "[STRATEGY] SyGuS rewritable." << std::endl;
     auto new_expr = load_smt_fundef(result_file, solver_cvc5);
     return cvc2btor.transfer_term(new_expr);
   } // end of loading SyGuS result

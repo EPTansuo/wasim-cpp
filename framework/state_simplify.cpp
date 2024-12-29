@@ -289,7 +289,30 @@ smt::Term replacement_and_constant_propagation(const smt::Term & expr,
     if (cached_children.size() && !t->is_value())
     {
       auto op = t->get_op();
-      if (op.prim_op == smt::And)  {
+      if (op.prim_op == smt::Implies) {
+        assert(cached_children.size() == 2);
+        auto ante  = cached_children.at(0);
+        auto consq = cached_children.at(1);
+        if (ante->is_value()) {
+          // true -> x : x
+          // false -> x : true
+          auto val = ante->to_string();
+          if (val == "#b0" || val == "false" || val == "(_ bv0 1)")
+            cache[t] = T;
+          else
+            cache[t] = consq;
+          continue;
+        } else if (consq->is_value()) {
+          // x -> false : not(x) // we know that x is not a value at this point
+          // x -> true : true
+          auto val = consq->to_string();
+          if (val == "#b0" || val == "false" || val == "(_ bv0 1)")
+            cache[t] = solver->make_term(smt::Not, ante);
+          else // true
+            cache[t] = T;
+          continue;
+        }
+      } else if (op.prim_op == smt::And)  {
         // check if any child of And is 0 or 1
         assert(cached_children.size() >= 2);
 

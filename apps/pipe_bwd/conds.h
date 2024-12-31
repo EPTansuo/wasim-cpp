@@ -26,6 +26,11 @@ struct Conds{
   void add(const smt::Term & t) {conds.push_back(t);}
 
   Conds backward(const smt::TermVec & assumptions) const {
+    
+    // make assumptions finer-grain
+    smt::TermVec parted_asmpts;
+    for (const auto & a : assumptions)
+      smt::conjunctive_partition(a, parted_asmpts, true);
 
     std::cout << "[backward] pre-check:" << std::endl;
     check_contains_inputvar();
@@ -41,7 +46,7 @@ struct Conds{
       
       // TODO: input variables?
       // TODO: think about this :  should be before this state
-      nexpr = expr_simplify_ite(nexpr, assumptions, solver);
+      nexpr = expr_simplify_ite(nexpr, parted_asmpts, solver);
       // conjunction participation
       smt::TermVec parted;
       smt::conjunctive_partition(nexpr, parted, true);
@@ -51,8 +56,10 @@ struct Conds{
         nvec.push_back(e);
     } // for each cond in 
 
+    ret.simplify_using_mutual_asmpt(ret.conds);
+
     // TODO : you may want to distruct bvand and and
-    ret.simplify_inputvar_foreach_constraint(assumptions);
+    ret.simplify_inputvar_foreach_constraint(parted_asmpts);
 
     std::cout << "[backward] post-check:" << std::endl;
     ret.check_contains_inputvar();
@@ -60,32 +67,39 @@ struct Conds{
     return ret;
   } // end of backwards
 
-  
+
+protected:
+  // this should not be called outside, use the one w.o. arg
   // simplify all conds, when processing c, using all conds other than c
-  void simplify_using_mutual_asmpt() {
+  void simplify_using_mutual_asmpt(smt::TermVec & asmpts) {
     auto & solver = s.get_solver();
-    for (auto it = conds.begin(); it != conds.end();  ++it) {
+    for (auto it = asmpts.begin(); it != asmpts.end();  ++it) {
       smt::TermVec conds_wo_c;
-      for (auto copy_it = conds.begin(); copy_it != conds.end();  ++copy_it) {
+      for (auto copy_it = asmpts.begin(); copy_it != asmpts.end();  ++copy_it) {
         if (copy_it != it)
           conds_wo_c.push_back(*copy_it);
       } // end of copy
       *it = expr_simplify_ite(*it, conds_wo_c, solver);
     }
     // remove trivial ones
-    for (auto it = conds.begin(); it != conds.end(); ) {
+    for (auto it = asmpts.begin(); it != asmpts.end(); ) {
       if ( (*it)->is_value() ) {
         if ((*it)->to_int() == 1) {
-          it = conds.erase(it);
+          it = asmpts.erase(it);
           std::cout << "[simplify] remove constant true" << std::endl;
           continue;
         }
         if ((*it)->to_int() == 0)
-         throw std::runtime_error("the condition cannot be satisfied!");
+         throw SimulatorException("the condition cannot be satisfied!");
       } // end of check
       ++it;
     }
   } // end of simplify_using_mutual_asmpt
+
+public:
+  void simplify_using_mutual_asmpt() {
+    simplify_using_mutual_asmpt(conds);
+  }
 
   // ----------------------------------------------------------------------------
   // for each constraint, try to simplify its inputs
@@ -102,6 +116,7 @@ struct Conds{
         if (c_rest != c) 
           all_asmpt.push_back(c_rest); // note here, after prior simplification, later onces will change as well
       }
+      simplify_using_mutual_asmpt(all_asmpt);
       
       smt::UnorderedTermSet vars;
       smt::get_free_symbols(c,vars);
@@ -191,6 +206,28 @@ struct Conds{
     return inputvars;
   }
 
+  smt::UnorderedTermSet get_semantically_contained_input_vars() const {
+    smt::UnorderedTermSet remaining_vars;
+    for (const auto & c : conds) {
+      smt::UnorderedTermSet vars;
+      get_free_symbols(c,vars);
+      
+      smt::TermVec conds_wo_c;
+      for (const auto & other_c : conds)
+        if(other_c != c)
+          conds_wo_c.push_back(other_c);
+
+      for (const auto & v : vars)
+        if(s.is_input_var(v)) {
+          if (!e_is_independent_of_v(c, v, conds_wo_c)) {
+            remaining_vars.insert(v);
+            std::cout << "[semantically contain input] "<< v->to_string() << std::endl;
+          }
+        }
+    }
+    return remaining_vars;
+  }
+
   smt::UnorderedTermSet get_syntactically_contained_next_input_vars() const {
     smt::UnorderedTermSet nxt_inputvars;
     for (const auto & c : conds) {
@@ -203,21 +240,6 @@ struct Conds{
     return nxt_inputvars;
   }
 
-  smt::UnorderedTermSet get_semantically_contained_input_vars() const {
-    smt::UnorderedTermSet remaining_vars;
-    for (const auto & c : conds) {
-      smt::UnorderedTermSet vars;
-      get_free_symbols(c,vars);
-      
-      for (const auto & v : vars)
-        if(s.is_input_var(v)) {
-          if (!e_is_independent_of_v(c, v, conds))
-            remaining_vars.insert(v);
-          std::cout << "[syntactically contain input] "<< v->to_string() << std::endl;
-        }
-    }
-    return remaining_vars;
-  }
 
   smt::UnorderedTermSet get_semantically_contained_next_input_vars() const {
     smt::UnorderedTermSet remaining_vars;
@@ -225,9 +247,14 @@ struct Conds{
       smt::UnorderedTermSet vars;
       get_free_symbols(c,vars);
       
+      smt::TermVec conds_wo_c;
+      for (const auto & other_c : conds)
+        if(other_c != c)
+          conds_wo_c.push_back(other_c);
+
       for (const auto & v : vars)
         if(s.is_next_input_var(v)) {
-          if (!e_is_independent_of_v(c, v, conds))
+          if (!e_is_independent_of_v(c, v, conds_wo_c))
             remaining_vars.insert(v);
           std::cout << "[syntactically contain next input] "<< v->to_string() << std::endl;
         }

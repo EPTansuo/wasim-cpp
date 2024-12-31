@@ -111,6 +111,22 @@ smt::Term substitute(smt::SmtSolver & s, const smt::Term & t, const smt::Unorder
   return walker.visit(tcopy);
 }
 
+
+unsigned term_level(const smt::Term & t) {
+  if (t->is_symbol())
+    return 1;
+  if (t->is_value())
+    return 1;
+
+  unsigned max_lvl = 0;
+  for (auto pos = t->begin(); pos != t->end(); ++pos) {
+    auto lvl = term_level(*pos);
+    if (lvl > max_lvl)
+      max_lvl = lvl;
+  }
+  return max_lvl + 1;
+}
+
 smt::Term ExistentialQuantification(const smt::Term & in, const smt::TermVec & vars_to_quantify, smt::SmtSolver & slv) {
   if (vars_to_quantify.empty()) {
     std::cout << "[ExistentialQuantification] nothing to quantify." << std::endl;

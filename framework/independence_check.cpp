@@ -190,7 +190,9 @@ bool get_unsatcore_for_e_is_independent_of_v(const smt::Term & e,
     auto pos = std::find(asmpts_transfered.begin(), asmpts_transfered.end(), a);
     assert(pos != asmpts_transfered.end());
     auto idx = (pos - asmpts_transfered.begin()) / 2;
-    out.push_back(assumptions.at(idx));
+     // It is possible that the same constraint appear twice
+    if (!(!out.empty()  && out.back() == assumptions.at(idx)))
+      out.push_back(assumptions.at(idx));
   }
   return true;
 }  // end of get_unsatcore_for_e_is_independent_of_v

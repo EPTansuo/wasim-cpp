@@ -29,132 +29,71 @@ using parsed_info = std::tuple<smt::UnorderedTermSet, // vars in expression
 
 static smt::Term quantify_away(const smt::Term & t, const smt::Term & var, const smt::TermVec & asmpts, smt::SmtSolver & solver) ;
 
-smt::Term remove_independent_var(
-    const smt::Term & expr, 
-    const smt::Term & var,
-    const smt::TermVec & asmpts,
-    smt::SmtSolver & solver) {
-  // traverse the expr from bottom up, for subterm containing var, 
-  //  - build a vector of subterm, from v to this parent.
-  //  - there could be multiple occurrence of v
-  std::vector<smt::TermVec> parent_chains;
-  { // find parent_chains
-    std::vector<std::tuple<smt::Term, int, bool> > stack;
-    smt::UnorderedTermSet visited_terms;
-    stack.push_back({expr, -1, false});
-    
-    while(!stack.empty()) {
-      auto & [current, parentId, visited] = stack.back();
-      if (visited) {
-        if (!current->is_symbol()) // should not add symbol to visited
-          visited_terms.insert(current); // o.w. will miss the multi occurrence of the same var
-        stack.pop_back();
-        continue;
-      } // else
-      if (visited_terms.find(current) != visited_terms.end()) {
-        stack.pop_back();
-        continue;
-      } // else
+static void get_parent_chains_of_var(const smt::Term & expr, const smt::Term & var, std::vector<smt::TermVec> & parent_chains)
+{
+  std::vector<std::tuple<smt::Term, int, bool> > stack;
+  smt::UnorderedTermSet visited_terms;
+  stack.push_back({expr, -1, false}); // <node, parent index, visited>
+  
+  while(!stack.empty()) {
+    auto & [current, parentId, visited] = stack.back();
+    if (visited) {
+      if (!current->is_symbol()) // should not add symbol to visited
+        visited_terms.insert(current); // o.w. will miss the multi occurrence of the same var
+      stack.pop_back();
+      continue;
+    } // else
+    if (visited_terms.find(current) != visited_terms.end()) {
+      stack.pop_back();
+      continue;
+    } // else
 
-      visited = true;
-      if(current->is_symbolic_const()) {
-        if (current == var) {
-          // TODO: record the parent chain
-          smt::TermVec parent_chain;
-          parent_chain.push_back(current);
+    visited = true;
+    if(current->is_symbolic_const()) {
+      if (current == var) {
+        // TODO: record the parent chain
+        smt::TermVec parent_chain;
+        parent_chain.push_back(current);
 
-          int par_id = parentId;
-          while(par_id > 0) {
-            parent_chain.push_back(std::get<0>(stack.at(par_id)));
-            par_id = std::get<1>(stack.at(par_id));
-          }
-          parent_chains.push_back(std::move(parent_chain));
+        int par_id = parentId;
+        while(par_id > 0) {
+          parent_chain.push_back(std::get<0>(stack.at(par_id)));
+          par_id = std::get<1>(stack.at(par_id));
         }
-      } else {
-        if (current->is_value()) // this guard is necessary
-          continue;              // because a value may still has its child in Boolector
-        int idx = stack.size()-1;
-        for (auto subterm_ : current) {
-          if (subterm_->is_value())
-            continue;
-          stack.push_back(std::tuple<smt::Term, int, bool>(subterm_, idx, false));
-        }
+        parent_chains.push_back(std::move(parent_chain));
       }
-    } // end of while (traverse)
-  } // end of find parent_chains
-  std::cout << "[DEBUG] #. parent chains: " << parent_chains.size() << "\n";
-
-  // substition map
-  smt::UnorderedTermSet subterms;
-  for (const auto & chain : parent_chains) {
-    // for each chain, try to find a term that is independent of 
-    bool found = false;
-    assert(chain.size());
-    for (size_t idx = 0; idx < chain.size(); ++idx) {
-      const auto & t = chain.at(idx);
-      if (e_is_independent_of_v(t, var, asmpts)) {
-        found = true;
-        if (t->get_op().prim_op == smt::Ite) {
-          smt::TermVec children(t->begin(), t->end());
-          assert(idx > 0);
-          const auto & prev_term = chain.at(idx-1);
-          if (children.at(0) != prev_term) {
-            auto cnst = check_if_constant(children.at(0), asmpts, solver);
-            if (cnst) {
-              auto val = cnst->to_string();
-              if ( (val == "#b1" || val == "true" || val == "(_ bv1 1)") && (prev_term !=children.at(1) )) {
-                subterms.insert(children.at(0));
-                // std::cout << "[WARNING] usually this should not happen. because simplify_ite is used first.\n";
-                throw SimulatorException("[WARNING] usually this should not happen. because simplify_ite is used first.");
-                break;
-              } else if ( (val == "#b0" || val == "false" || val == "(_ bv0 1)") && (prev_term !=children.at(2) )) {
-                subterms.insert(children.at(0));
-                // std::cout << "[WARNING] usually this should not happen. because simplify_ite is used first.\n";
-                throw SimulatorException("[WARNING] usually this should not happen. because simplify_ite is used first.");
-                break;       
-              }
-            } else {
-              std::cout << "ITE is independent, but its COND is not!\n" ;
-              std::cout << "[WARNING] very likely SyGuS rewriting will fail!\n";
-            }
-          }
-        }
-        subterms.insert(t);
-        break;
+    } else {
+      if (current->is_value()) // this guard is necessary
+        continue;              // because a value may still has its child in Boolector
+      int idx = stack.size()-1;
+      for (auto subterm_ : current) {
+        if (subterm_->is_value())
+          continue;
+        stack.push_back(std::tuple<smt::Term, int, bool>(subterm_, idx, false));
       }
-    } // for each element in chain
-    if (!found)
-      throw SimulatorException("Cannot eliminate var: " + var->to_string() );
-  } // for each chain
-  #error rank subterms according to their sizes
-  // rewrite from smallest to largest
-  // rewrite immediately, instead of having a map
-
-  // and remember to rewrite the later terms as well as the 
-
-  // at this point, we know the terms in subterms are reducible,
-  // then we can try different strategies
-  smt::UnorderedTermMap submap;
-  for (const auto & t : subterms) {
-    if (submap.find(t) != submap.end())  {
-      std::cout << "[DEBUG] multiple chains" << std::endl;
-      continue; // no need to recompute...
     }
-    // |  this could happen if multiple chains end up with the same node
+  } // end of while (traverse)
+} // end of get_parent_chains_of_var
+
+static smt::Term try_simplify_strategies(const smt::Term & ret_expr, const smt::Term & t, const smt::Term & var, const smt::TermVec & asmpts, smt::SmtSolver & solver)
+{
+  { // strategy 1 : check if constant
     auto cnst = check_if_constant(t, asmpts, solver);
     if (cnst) { // if it is a constant
-      submap.emplace(t, cnst);
       std::cout << "[STRATEGY] tied to constant" << std::endl;
-      continue;
+      return replacement_and_constant_propagation(ret_expr, {{t, cnst}}, solver);
     } // if it is not a constant
+  } // end of strategy 1
+  { // strategy 2 : sygus simplification
     // then we need to invoke SyGuS rewriting
     auto simplified_term = sygus_simplify(t, var, asmpts, solver);
     if (simplified_term) { // sygus succeeded
-      submap.emplace(t, simplified_term);
-      continue;
+      return replacement_and_constant_propagation(ret_expr, {{t,simplified_term }}, solver);
     } // else: continue with other methods
+  } // end of strategy 2
+  { // strategy 3 : enumeration
     if ( (var->get_sort()->get_sort_kind() == smt::BOOL ||
-         (var->get_sort()->get_sort_kind() == smt::BV &&
+        (var->get_sort()->get_sort_kind() == smt::BV &&
             var->get_sort()->get_width() <= 4  ))  // 2-bit var is also okay
         ) {
       smt::TermVec related_asmpts;
@@ -162,17 +101,111 @@ smt::Term remove_independent_var(
       assert(res);
       std::cout << "[remove var] try to quantify v: " << var->to_string() << std::endl;
       auto reduced_form = quantify_away(t, var, related_asmpts, solver);
-      submap.emplace(t, reduced_form);
       std::cout << "--- BEFORE: " << t->to_string() << std::endl;
       std::cout << "--- AFTER: " << reduced_form->to_string() << std::endl;
       std::cout << "[STRATEGY] Quantified." << std::endl;
-      continue;
+      return replacement_and_constant_propagation(ret_expr, {{t, reduced_form}}, solver);
     }
-    throw SimulatorException("Cannot eliminate var: " + var->to_string());
-    // replace 
-  } // end of each subterm
-  
-  return replacement_and_constant_propagation(expr, submap, solver);
+  } // end strategy 3
+  // if we arrive at this place, we are running out of methods...
+  // :-( Bad luck
+  throw SimulatorException("Cannot eliminate var: " + var->to_string());
+  return nullptr;
+} // end of try_simplify_strategies
+
+
+smt::Term remove_independent_var(
+    const smt::Term & expr_in, 
+    const smt::Term & var,
+    const smt::TermVec & asmpts,
+    smt::SmtSolver & solver) {
+  // traverse the expr from bottom up, for subterm containing var, 
+  //  - build a vector of subterm, from v to this parent.
+  //  - there could be multiple occurrence of v
+
+  // rewrite from smallest term to largest
+  // rewrite immediately, instead of having a map
+  auto modified_expr = expr_in;
+  do {
+    std::vector<smt::TermVec> parent_chains;
+    get_parent_chains_of_var(modified_expr, var, parent_chains);
+    std::cout << "[DEBUG] #. parent chains: " << parent_chains.size() << "\n";
+    if (parent_chains.empty()) {
+      // vars have been removed;
+      break;
+    }
+
+    // for each chain, find its proper parent, to build
+    // substition map
+    int min_depth = -1;
+
+    smt::Term subterm_of_this_round;
+    for (const auto & chain : parent_chains) {
+      // for each chain, try to find a term that is independent of 
+      bool found = false;
+      bool skipped_this_chain = false;
+      assert(chain.size());
+      for (size_t idx = 0; idx < chain.size(); ++idx) {
+        const auto & t = chain.at(idx);
+
+        auto t_depth = term_level(t);
+        if (min_depth > 0 && min_depth < t_depth) {
+          // this is already larger than what we found, 
+          // skipped this chain altogether
+          skipped_this_chain = true;
+          break;
+        }
+
+        if (e_is_independent_of_v(t, var, asmpts)) {
+          found = true;
+          // maintain min_depth
+          if (min_depth == -1)
+            min_depth = t_depth;
+
+          if (t->get_op().prim_op == smt::Ite) {
+            smt::TermVec children(t->begin(), t->end());
+            assert(idx > 0);
+            const auto & prev_term = chain.at(idx-1);
+            if (children.at(0) != prev_term) {
+              auto cnst = check_if_constant(children.at(0), asmpts, solver);
+              if (cnst) {
+                auto val = cnst->to_string();
+                if ( (val == "#b1" || val == "true" || val == "(_ bv1 1)") && (prev_term !=children.at(1) )) {
+                  subterm_of_this_round = children.at(0);
+                  // std::cout << "[WARNING] usually this should not happen. because simplify_ite is used first.\n";
+                  throw SimulatorException("[WARNING] usually this should not happen. because simplify_ite is used first.");
+                  break;
+                } else if ( (val == "#b0" || val == "false" || val == "(_ bv0 1)") && (prev_term !=children.at(2) )) {
+                  subterm_of_this_round = children.at(0);
+                  // std::cout << "[WARNING] usually this should not happen. because simplify_ite is used first.\n";
+                  throw SimulatorException("[WARNING] usually this should not happen. because simplify_ite is used first.");
+                  break;       
+                }
+              } else {
+                std::cout << "ITE is independent, but its COND is not!\n" ;
+                std::cout << "[WARNING] very likely SyGuS rewriting will fail!\n";
+              }
+            }
+          }
+          subterm_of_this_round = t;
+          break;
+        }
+      } // for each element in chain
+      if (skipped_this_chain) {
+        assert(parent_chains.size() > 1);
+        continue; // go to next chain and see if there are smaller terms
+      }
+
+      if (!found)
+        throw SimulatorException("Cannot eliminate var: " + var->to_string() );
+    } // for each chain
+
+    // at this point, we know the term in subterm_of_this_round is reducible,
+    // then we can try different strategies
+    modified_expr = try_simplify_strategies(modified_expr, subterm_of_this_round, var, asmpts, solver);
+
+  } while(true);
+  return modified_expr; 
 } // end of remove_independent_var
 
 static smt::Term smart_and(const smt::TermVec & asmpts, smt::SmtSolver & solver) {
@@ -201,6 +234,10 @@ static smt::Term quantify_away(const smt::Term & t, const smt::Term & var, const
   // ((asmpts | var = 0) : a1 => t1 | var = 0
   // ((asmpts | var = 1) : a2 => t2 | var = 1
   // check if (asmpts /\ not(a1) /\ not(a2) ) is sat?
+  std::cout << "[DEBUG] quantify_away " << std::endl;
+  for (const auto & a : asmpts) {
+    std::cout << "[DEBUG] asmpt: " << a->to_string() << std::endl;
+  }
   auto asmpt_all = smart_and(asmpts, solver);
   smt::TermVec asmpt_under_diff_val;
   smt::TermVec t_under_diff_val;

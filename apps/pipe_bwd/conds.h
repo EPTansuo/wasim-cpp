@@ -57,6 +57,12 @@ struct Conds{
     } // for each cond in 
 
     ret.simplify_using_mutual_asmpt(ret.conds);
+    for (const auto & c : ret.conds) {
+      auto s = c->to_string();
+      if (s.find("BTOR_") != string::npos) {
+        std::cout << "!!!!!!!!!!!!\n"; exit(1);
+      }
+    }
 
     // TODO : you may want to distruct bvand and and
     ret.simplify_inputvar_foreach_constraint(parted_asmpts);
@@ -84,12 +90,13 @@ protected:
     // remove trivial ones
     for (auto it = asmpts.begin(); it != asmpts.end(); ) {
       if ( (*it)->is_value() ) {
-        if ((*it)->to_int() == 1) {
+        auto val = (*it)->to_string();
+        if (val == "#b1" || val == "true" || val == "#t" || val == "(_ bv1 1)") {
           it = asmpts.erase(it);
           std::cout << "[simplify] remove constant true" << std::endl;
           continue;
         }
-        if ((*it)->to_int() == 0)
+        if (val == "#b0" || val == "false" || val == "#f" || val == "(_ bv0 1)")
          throw SimulatorException("the condition cannot be satisfied!");
       } // end of check
       ++it;
@@ -140,6 +147,13 @@ public:
               if (tmp_varset.find(v) != tmp_varset.end()) {
                 std::cout << "[DEBUG] "  << c->to_string() << std::endl;
                 throw SimulatorException("ERROR: not removed: var " + v->to_string());
+              }
+
+              {
+                  auto s = c->to_string();
+                  if (s.find("BTOR_") != string::npos) {
+                    std::cout << "!!!!!!!!!!!!\n"; exit(1);
+                  }
               }
             }
         } // end of for each var

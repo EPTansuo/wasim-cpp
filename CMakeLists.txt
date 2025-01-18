@@ -261,6 +261,12 @@ target_link_libraries(pipe_forward wasim-lib)
 add_executable(pipe "apps/pipe.cpp")
 target_link_libraries(pipe wasim-lib)
 
+add_executable(p4stage "apps/pipe_4stage.cpp")
+target_link_libraries(p4stage wasim-lib)
+
+add_executable(piccolo "apps/pipe_piccolo.cpp")
+target_link_libraries(piccolo wasim-lib)
+
 # add_executable(independence_check_test "independence_check_test.cpp")
 # target_link_libraries(independence_check_test wasim)
 

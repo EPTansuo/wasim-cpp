@@ -96,37 +96,31 @@ int main() {
   solver->set_opt("produce-unsat-assumptions", "true");
 
   TransitionSystem sts(solver);
-  // BTOR2Encoder btor_parser("/home/hongcez/mingkai/pipe/simple_pipe_stall_short.btor2", sts);
-  BTOR2Encoder btor_parser("/home/hongcez/mingkai/pipe/simple_pipe_stall_short_reg.btor2", sts);
-
-  // std::cout << sts.trans()->to_string() << std::endl  
-  
-  // ex_wb_inst[7:6] == 2'b01    Eq( Sel(Sv("ex_wb_inst"), 7, 6), 1 )
-  // rs1 = ex_wb_inst[5:4]       auto rs1 = Sel(Sv("ex_wb_inst"), 5,4)
-  // rs2 = ex_wb_inst[3:2]       auto rs2 = Sel(Sv("ex_wb_inst"), 3,2)
-  // rd = ex_wb_inst[1:0]        auto rd  = Sel(Sv("ex_wb_inst"), 1,0)
-  // ex_wb_rd == rd              Eq(Sv("ex_wb_rd"), rd)
-  // ex_wb_reg_wen == 1          Eq(Sv("ex_wb_reg_wen"), 1)
-  //                             registers = Collect("registers")
-  // ex_wb_val == register[rs1] + register[rs2]   Eq(Sv("ex_wb_val"), Add(Read(registers,rs1), Read(registers, rs2)) )
+  BTOR2Encoder btor_parser("/home/hongcez/mingkai/piccolo/piccolo.btor2", sts);
 
   Conds LastState(sts);
   {
-    LastState.add( Eq( Sel( Sv("ex_wb_inst"), 7, 6), 1 ) );
-    auto rs1 = Sel(Sv("ex_wb_inst"), 5,4);
-    auto rs2 = Sel(Sv("ex_wb_inst"), 3,2);
-    auto rd  = Sel(Sv("ex_wb_inst"), 1,0);
-    LastState.add(Eq(Sv("ex_wb_valid"), 1));
-    LastState.add(Eq(Sv("ex_wb_rd"), rd));
-    LastState.add(Eq(Sv("ex_wb_reg_wen"), 1));
-    auto registers = Collect("registers","","");
-    LastState.add( Eq(Sv("ex_wb_val"), Add(Read(registers,rs1), Read(registers, rs2)) ) );
+    auto inst = Sv("inst_reg_s3");
+    auto rd = Sel( inst , 11, 7);
+    auto rs1 = Sel( inst , 19, 15);
+    auto rs2 = Sel( inst , 24, 20);
+    LastState.add(Eq(Sv("s2_to_s3"), 1));
+    LastState.add(Eq(Sv("gpr_regfile.write_rd_rd"), rd));
+
+    LastState.add(Eq(Sv("gpr_regfile.EN_write_rd"), 1));
+    auto registers = Collect("gpr_regfile.regfile.arr","[","]");
+    LastState.add( Eq(Sv("gpr_regfile.write_rd_rd_val"), Add(Read(registers,rs1), Read(registers, rs2)) ) );
   }
   LastState.print();
   // LastState --> wb_ex == 0 --> LastState (get next state, simplify?)
   //  state union?
-  TransCheck(LastState, { Eq(Sv("wb_go"), 0), Eq(Sv("rst"), 0)}, LastState, NULL);
+  // TransCheck(LastState, { Eq(Sv("s3_deq$EN"), 0), Eq(Sv("RST_N"), 1)}, LastState, NULL);
+  // TransCheck(LastState, { Eq(Sv("s3_deq$D_IN"), 0), Eq(Sv("RST_N"), 1)}, LastState, NULL);
+  TransCheck(LastState, { Eq(Sv("rg_retiring$EN"), 0), Eq(Sv("RST_N"), 1)}, LastState, NULL);
 
+  // TODO: you may need to add invariant-gen
+
+#if 0
   // SecondLastState --> Eq(Sv("ex_go"), 1) -->  LastState
 
   std::cout << "--------Back to id_ex_regs ---------------\n" ;
@@ -175,25 +169,7 @@ int main() {
   // assert(failed_constraints2.empty());
 
   exit(1);
-
-#if 0  
-  auto IdExHoldState = IdExState.backward({ Eq(Sv("ex_go"), 0), Eq(Sv("rst"), 0)});
-  
-  std::cout << "======== IdExHoldState\n" ;
-  IdExHoldState.print();
-  // IdExState = IdExState.smart_union(IdExHoldState);
-  // then check again
-  std::cout << "======== IdExState\n" ;
-  IdExState.print();
-  assert(failed_constraints.empty());
-
-
-  std::cout << "--------Back to id_ex_regs ---------------\n" ;
-
-  IdExState.backward({Eq(Sv("id_go"),1), Eq(Sv("rst"), 0)});
-  IdExState.print();
 #endif
-
 
   return 0;
 }

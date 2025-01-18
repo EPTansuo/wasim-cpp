@@ -376,7 +376,7 @@ smt::Term sygus_simplify(const smt::Term & t, const smt::Term & var_to_remove,
       if (vars.find(var_in_cvc) == vars.end() ) {
         std::cout << "[STRATEGY] ITE full case removable" << std::endl;
         // if succcefully removed
-        return cvc2btor.transfer_term(ret);
+        return cvc2btor.transfer_term(ret, false);
       }
     }
   } // end of strategies

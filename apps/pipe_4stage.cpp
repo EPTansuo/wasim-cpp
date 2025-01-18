@@ -97,10 +97,11 @@ int main() {
 
   TransitionSystem sts(solver);
   // BTOR2Encoder btor_parser("/home/hongcez/mingkai/pipe/simple_pipe_stall_short.btor2", sts);
-  BTOR2Encoder btor_parser("/home/hongcez/mingkai/pipe/simple_pipe_stall_short_reg.btor2", sts);
+  // BTOR2Encoder btor_parser("/home/hongcez/mingkai/pipe/simple_pipe_stall_reg.btor2", sts);
+  BTOR2Encoder btor_parser("/home/hongcez/mingkai/pipe/simple_pipe_stall_reg_w_envinv.btor2", sts);
 
   // std::cout << sts.trans()->to_string() << std::endl  
-  
+
   // ex_wb_inst[7:6] == 2'b01    Eq( Sel(Sv("ex_wb_inst"), 7, 6), 1 )
   // rs1 = ex_wb_inst[5:4]       auto rs1 = Sel(Sv("ex_wb_inst"), 5,4)
   // rs2 = ex_wb_inst[3:2]       auto rs2 = Sel(Sv("ex_wb_inst"), 3,2)
@@ -156,9 +157,25 @@ int main() {
   }
 
   auto IfIdState = IdExState.backward({Eq(Sv("id_go"),1), Eq(Sv("rst"), 0)});
+  IfIdState.add(Eq(Sv("if_id_valid"), 1));
   IfIdState.print();
-  failed_constraints.clear();
-  auto res = TransCheck(IfIdState, { Eq(Sv("id_go"), 0), Eq(Sv("rst"), 0)}, IfIdState, &failed_constraints);
+
+  {
+    failed_constraints.clear(); // however, this fails!!!
+    TermVec asmpts = { Eq(Sv("id_go"), 0), Eq(Sv("rst"), 0)};
+    for (const auto & c : sts.constraints()) {
+      std::cout << c.first->to_string() << "\n";
+      asmpts.push_back(c.first);
+    }
+    auto res = TransCheck(IfIdState, asmpts, IfIdState, &failed_constraints);
+  }
+
+  TermVec asmpts = { Eq(Sv("if_go"), 1), Eq(Sv("rst"), 0)};
+  for (const auto & c : sts.constraints()) { // need environment invariant!!!
+    asmpts.push_back(c.first);
+  }
+  auto IfState = IfIdState.backward(asmpts);
+  IfState.print();
 
   // check this property:
   //  (inst_valid && inst_ready) && (inst[7:6] == ADD) |-> (constraints in IfIdState)

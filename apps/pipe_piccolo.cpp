@@ -112,6 +112,7 @@ int main() {
     LastState.add( Eq(Sv("gpr_regfile.write_rd_rd_val"), Add(Read(registers,rs1), Read(registers, rs2)) ) );
   }
   LastState.print();
+  LastState.simplify_inputvar_foreach_constraint({}); // try to simplify the inputvars
   // LastState --> wb_ex == 0 --> LastState (get next state, simplify?)
   //  state union?
   // TransCheck(LastState, { Eq(Sv("s3_deq$EN"), 0), Eq(Sv("RST_N"), 1)}, LastState, NULL);

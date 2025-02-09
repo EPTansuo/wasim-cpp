@@ -39,7 +39,6 @@ bool TransCheck(const Conds & c1, const TermVec & transcond, const Conds & c2, T
   const auto & sts = c1.s;
   bool succ = true;
 
-  
   TermVec c2_simplifed;
   {// first simplify c2
     // collect all assumptions

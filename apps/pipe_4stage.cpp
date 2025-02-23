@@ -9,12 +9,99 @@ using namespace wasim;
 using namespace smt;
 
 
+// WIP: disable for now
+#if 0
+// a helper function : the rev version
+// it goes from the end to the beginning
+void remove_and_move_to_next_backward( /* INOUT */ smt::TermList & eqs, /* INOUT */ smt::TermList::iterator & eq_pos,
+  const smt::UnorderedTermSet & unsatcore) {
+
+  auto pred_iter = eqs.end(); // pred_pos;
+  auto pred_pos_new = eqs.end();
+
+  pred_pos_new--;
+
+  bool reached = false;
+  bool next_pos_found = false;
+
+  while( pred_iter != eqs.begin() ) {
+    pred_iter--;
+    
+    if (!reached && pred_iter == eq_pos)
+      reached = true;
+    
+    if (unsatcore.find(*pred_iter) == unsatcore.end()) {
+      assert (reached);
+      pred_iter = eqs.erase(pred_iter);
+    } else {
+      if (reached && ! next_pos_found) {
+        pred_pos_new = pred_iter;
+        pred_pos_new ++;
+
+        next_pos_found = true;
+      }
+    }
+  } // end of while
+
+  assert(reached);
+  if (! next_pos_found) {
+    assert (pred_iter == eqs.begin());
+    pred_pos_new = pred_iter;
+  }
+  eq_pos = pred_pos_new;
+} // remove_and_move_to_next_backward
+
+void reduce_eq_linear_backwards(SmtSolver & sts, smt::TermList & conjs) {
+  auto to_remove_pos_prev = conjs.end();
+  while(to_remove_pos_prev != conjs.begin()) {
+    to_remove_pos_prev--; // firstly, point to the last one
+    if (conjs.size() == 1)
+      continue;
+
+    smt::Term term_to_remove = *to_remove_pos_prev;
+    auto pos_after_conj = conjs.erase(to_remove_pos_prev);
+    smt::Result r = sts->check_sat_assuming_list(conjs);
+    to_remove_pos_prev = conjs.insert(pos_after_conj, term_to_remove);
+    if (r.is_sat())
+      continue;
+    // else { // if unsat, we can remove
+    smt::UnorderedTermSet core_set;
+    sts->get_unsat_assumptions(core_set);
+    // below function will update assumption_list and to_remove_pos
+    remove_and_move_to_next_backward(conjs, to_remove_pos_prev, core_set);
+  } // end of while
+} // end of 
+
+void ExtractReducedModel(SmtSolver & sts, const smt::Term & postc, const smt::TermVec & transcond) {
+  UnorderedTermSet vars;
+  get_free_symbols(postc, vars);
+  // TODO
+  TermVec eqs; // v == val
+  for (const auto & v : vars) {
+    auto val = sts->get_value(v);
+    eqs.push_back(sts->make_term(Equal, v, val));
+  }
+  // postc /\ transcond /\ ( v == val /\ ... )   should be UNSAT 
+  // sort eqs, small width -> large width
+  sort(eqs);
+
+  sts->push();
+  for (const auto & a : transcond)
+    sts->assert_formula(a);
+  reduce_eq_linear_backwards(sts, eqs);
+  sts->pop();
+} // end of ExtractReducedModel
+#endif
+
 void ExamineModel(SmtSolver & sts, const smt::Term & postc, const Conds & prec) {
   UnorderedTermSet prevars;
   UnorderedTermSet postvars;
+  // collect all variables in pre-cond
   for (const auto & c : prec.conds)
     get_free_symbols(c,prevars);
 
+  // postvars are also over pre-state, because we already
+  // substitute it by transition relations
   get_free_symbols(postc, postvars);
   UnorderedTermMap pre_vmap;
   UnorderedTermMap post_vmap;
@@ -97,7 +184,7 @@ int main() {
   TransitionSystem sts(solver);
   // BTOR2Encoder btor_parser("/home/hongcez/mingkai/pipe/simple_pipe_stall_short.btor2", sts);
   // BTOR2Encoder btor_parser("/home/hongcez/mingkai/pipe/simple_pipe_stall_reg.btor2", sts);
-  BTOR2Encoder btor_parser("/home/hongcez/mingkai/pipe/simple_pipe_stall_reg_w_envinv.btor2", sts);
+  BTOR2Encoder btor_parser(PROJECT_SOURCE_DIR "/design/bwdsim/simple_pipe_stall_reg_w_envinv.btor2", sts);
 
   // std::cout << sts.trans()->to_string() << std::endl  
 
@@ -175,41 +262,6 @@ int main() {
   }
   auto IfState = IfIdState.backward(asmpts);
   IfState.print();
-
-  // check this property:
-  //  (inst_valid && inst_ready) && (inst[7:6] == ADD) |-> (constraints in IfIdState)
-  
-  // TODO : semantically removing independent input vars
-
-  // find the leaf that 
-  // TODO: compute fixedpoint under { Eq(Sv("ex_go"), 0), Eq(Sv("rst"), 0)}
-  // check that fixed point guarantees { Eq(Sv("ex_go"), 1), Eq(Sv("rst"), 0)}     LastState
-  // auto IdExStateFixedpoint = IdExState.compute_fixedpoint({ Eq(Sv("ex_go"), 0), Eq(Sv("rst"), 0)});
-
-  // TermVec failed_constraints2;
-  // TransCheck(IdExStateFixedpoint,  { Eq(Sv("ex_go"), 1), Eq(Sv("rst"), 0)}, LastState, &failed_constraints2);
-  // assert(failed_constraints2.empty());
-
-  exit(1);
-
-#if 0  
-  auto IdExHoldState = IdExState.backward({ Eq(Sv("ex_go"), 0), Eq(Sv("rst"), 0)});
-  
-  std::cout << "======== IdExHoldState\n" ;
-  IdExHoldState.print();
-  // IdExState = IdExState.smart_union(IdExHoldState);
-  // then check again
-  std::cout << "======== IdExState\n" ;
-  IdExState.print();
-  assert(failed_constraints.empty());
-
-
-  std::cout << "--------Back to id_ex_regs ---------------\n" ;
-
-  IdExState.backward({Eq(Sv("id_go"),1), Eq(Sv("rst"), 0)});
-  IdExState.print();
-#endif
-
 
   return 0;
 }

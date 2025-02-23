@@ -1,0 +1,11 @@
+read_verilog -sv simple_pipe_stall.v
+prep -top pipeline_v
+
+hierarchy -check
+proc
+
+memory;
+flatten
+setundef -undriven -expose;
+sim -clock clk -reset rst -rstlen 1 -n 1 -w pipeline_v
+write_btor  -s simple_pipe_stall.btor2

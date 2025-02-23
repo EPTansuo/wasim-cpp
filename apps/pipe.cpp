@@ -1,3 +1,7 @@
+// HZ: this is checking a 3-stage pipeline
+// using backward simulation
+// For this checking, no extra environmental invariants are needed
+// but for the 4-stage pipe, it is needed
 #include <chrono>
 #include "assert.h"
 #include "config/testpath.h"
@@ -12,9 +16,12 @@ using namespace smt;
 void ExamineModel(SmtSolver & sts, const smt::Term & postc, const Conds & prec) {
   UnorderedTermSet prevars;
   UnorderedTermSet postvars;
+  // collect all variables in pre-cond
   for (const auto & c : prec.conds)
     get_free_symbols(c,prevars);
 
+  // postvars are also over pre-state, because we already
+  // substitute it by transition relations
   get_free_symbols(postc, postvars);
   UnorderedTermMap pre_vmap;
   UnorderedTermMap post_vmap;
@@ -97,7 +104,7 @@ int main() {
 
   TransitionSystem sts(solver);
   // BTOR2Encoder btor_parser("/home/hongcez/mingkai/pipe/simple_pipe_stall_short.btor2", sts);
-  BTOR2Encoder btor_parser("/home/hongcez/mingkai/pipe/simple_pipe_stall_short_reg.btor2", sts);
+  BTOR2Encoder btor_parser(PROJECT_SOURCE_DIR "/design/bwdsim/simple_pipe_stall_short_reg.btor2", sts);
 
   // std::cout << sts.trans()->to_string() << std::endl  
   
@@ -110,7 +117,7 @@ int main() {
   //                             registers = Collect("registers")
   // ex_wb_val == register[rs1] + register[rs2]   Eq(Sv("ex_wb_val"), Add(Read(registers,rs1), Read(registers, rs2)) )
 
-  Conds LastState(sts);
+  Conds LastState(sts); // at WB stage
   {
     LastState.add( Eq( Sel( Sv("ex_wb_inst"), 7, 6), 1 ) );
     auto rs1 = Sel(Sv("ex_wb_inst"), 5,4);
@@ -125,7 +132,8 @@ int main() {
   LastState.print();
   // LastState --> wb_ex == 0 --> LastState (get next state, simplify?)
   //  state union?
-  TransCheck(LastState, { Eq(Sv("wb_go"), 0), Eq(Sv("rst"), 0)}, LastState, NULL);
+  auto res = TransCheck(LastState, { Eq(Sv("wb_go"), 0), Eq(Sv("rst"), 0)}, LastState, NULL);
+  assert(res); // this must succeed
 
   // SecondLastState --> Eq(Sv("ex_go"), 1) -->  LastState
 
@@ -136,17 +144,20 @@ int main() {
   IdExState.add(Eq(Sv("id_ex_valid"), 1));
   IdExState.add(Eq(Sv("id_ex_op"), 1));
 
-  IdExState.simplify_using_mutual_asmpt(); // HZ there are input variables that you cannot avoid...
+  // HZ: although we try to simplify below
+  // but there are input variables that you cannot eliminate...
+  IdExState.simplify_using_mutual_asmpt();
   IdExState.print();
   IdExState.add(Eq(Sel(Sv("id_ex_inst"),7,6), 1));
 
-  // ex_go ==0 /\ rst == 0 |-> id_go == 0
+  // The following checks if this is valid: ex_go ==0 /\ rst == 0 |-> id_go == 0
   std::cout << "Check:"<< IdExState.check( Eq(Sv("id_go"), 0), { Eq(Sv("ex_go"), 0), Eq(Sv("rst"), 0)}  ) << std::endl;
 
 
   TermVec failed_constraints;
   // check if we start from pre-state with assumptions, are we guaranteed to end in a state satisfiying post-conditon
-  TransCheck(IdExState, { Eq(Sv("ex_go"), 0), Eq(Sv("rst"), 0)}, IdExState, &failed_constraints);
+  res = TransCheck(IdExState, { Eq(Sv("ex_go"), 0), Eq(Sv("rst"), 0)}, IdExState, &failed_constraints);
+  assert(res); // the next loop should be useless, because there should be no failed_constraints
   for (const auto & a : failed_constraints) {
     // TODO: remove the old one...
     std::cout << "[TransCheck] Failed to comply with: " << a->to_string() << std::endl;
@@ -157,45 +168,17 @@ int main() {
 
   auto IfIdState = IdExState.backward({Eq(Sv("id_go"),1), Eq(Sv("rst"), 0)});
   IfIdState.print();
-  failed_constraints.clear();
-  auto res = TransCheck(IfIdState, { Eq(Sv("id_go"), 0), Eq(Sv("rst"), 0)}, IfIdState, &failed_constraints);
-
-  // check this property:
-  //  (inst_valid && inst_ready) && (inst[7:6] == ADD) |-> (constraints in IfIdState)
-  
-  // TODO : semantically removing independent input vars
-
-  // find the leaf that 
-  // TODO: compute fixedpoint under { Eq(Sv("ex_go"), 0), Eq(Sv("rst"), 0)}
-  // check that fixed point guarantees { Eq(Sv("ex_go"), 1), Eq(Sv("rst"), 0)}     LastState
-  // auto IdExStateFixedpoint = IdExState.compute_fixedpoint({ Eq(Sv("ex_go"), 0), Eq(Sv("rst"), 0)});
-
-  // TermVec failed_constraints2;
-  // TransCheck(IdExStateFixedpoint,  { Eq(Sv("ex_go"), 1), Eq(Sv("rst"), 0)}, LastState, &failed_constraints2);
-  // assert(failed_constraints2.empty());
-
-  exit(1);
-
-#if 0  
-  auto IdExHoldState = IdExState.backward({ Eq(Sv("ex_go"), 0), Eq(Sv("rst"), 0)});
-  
-  std::cout << "======== IdExHoldState\n" ;
-  IdExHoldState.print();
-  // IdExState = IdExState.smart_union(IdExHoldState);
-  // then check again
-  std::cout << "======== IdExState\n" ;
-  IdExState.print();
-  assert(failed_constraints.empty());
-
-
-  std::cout << "--------Back to id_ex_regs ---------------\n" ;
-
-  IdExState.backward({Eq(Sv("id_go"),1), Eq(Sv("rst"), 0)});
-  IdExState.print();
-#endif
-
-
+  // This will print 2 conditions
+  //   This first one is: D:= (= #b01 ((_ extract 7 6) inst)) 
+  //   This is the decode condition
+  //   The other is a long condition (C)
+  //   Model checking can easily prove: D |-> C
+  ///    See the verilog in design/bwdsim, you can uncomment and check it
+  //   TODO 1: integrate model checking!!!
+  //   TODO 2: add another check to certify the simulation result
+  //   TODO 3: maybe integrate with certifaiger
   return 0;
+
 }
 
 

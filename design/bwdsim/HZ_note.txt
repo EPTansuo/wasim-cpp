@@ -1,0 +1,5 @@
+These are two designs.
+The one with "short" in its name is a 3-stage pipeline.
+The other is a 4-stage pipeline.
+Properties to prove are in `app/pipe.cpp` and `app/pipe_4stage.cpp`
+

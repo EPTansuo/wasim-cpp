@@ -1,0 +1,15 @@
+read_verilog -sv /home/hongce/ila/ILAng-rfmap/test/unit-data/vpipe/verify_stall/NOP/wrapper.v
+prep -top wrapper
+
+hierarchy -check
+proc
+chformal -assume -early;
+
+select wrapper/normalassert
+chformal -remove
+select *
+
+memory -nomap;
+flatten
+sim -clock clk -reset rst -rstlen 1 -n 1 -w wrapper
+write_btor  -s sanity.btor2

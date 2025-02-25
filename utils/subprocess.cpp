@@ -30,7 +30,7 @@ namespace wasim {
         std::string stdErr;
         int returnStatus = 0;
 
-        boost::asio::io_service ios;
+        boost::asio::io_context ios;
         boost::process::group group;
         boost::asio::deadline_timer deadline_timer;
     };

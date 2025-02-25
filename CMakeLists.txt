@@ -35,6 +35,7 @@ if (WITH_PROFILING)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DWITH_PROFILING")
 endif()
 
+
 list(APPEND CMAKE_PREFIX_PATH "${PROJECT_SOURCE_DIR}/deps/bison/bison-install")
 list(APPEND CMAKE_PREFIX_PATH "${PROJECT_SOURCE_DIR}/deps/flex/flex-install")
 if (APPLE)
@@ -71,6 +72,10 @@ set(SMT_SWITCH_DIR "${PROJECT_SOURCE_DIR}/deps/smt-switch")
 set(CMAKE_MODULE_PATH ${SMT_SWITCH_DIR}/cmake)
 
 find_package(GMP REQUIRED)
+
+find_package(GFlags REQUIRED)
+
+set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -L/usr/lib -lunwind") 
 
 # Check that dependencies are there
 if (NOT EXISTS "${SMT_SWITCH_DIR}/local/include/smt-switch/smt.h")
@@ -249,23 +254,23 @@ endif()
 
 
 add_executable(test1 "apps/test.cpp")
-target_link_libraries(test1 wasim-lib)
+target_link_libraries(test1 wasim-lib gflags)
 
 # add_executable(pipe "apps/pipe.cpp")
 # target_link_libraries(pipe wasim-lib)
 
 add_executable(pipe_forward "apps/pipe_forward.cpp")
-target_link_libraries(pipe_forward wasim-lib)
+target_link_libraries(pipe_forward wasim-lib gflags)
 
 
 add_executable(pipe "apps/pipe.cpp")
-target_link_libraries(pipe wasim-lib)
+target_link_libraries(pipe wasim-lib gflags)
 
 add_executable(p4stage "apps/pipe_4stage.cpp")
-target_link_libraries(p4stage wasim-lib)
+target_link_libraries(p4stage wasim-lib gflags)
 
 add_executable(piccolo "apps/pipe_piccolo.cpp")
-target_link_libraries(piccolo wasim-lib)
+target_link_libraries(piccolo wasim-lib gflags)
 
 # add_executable(independence_check_test "independence_check_test.cpp")
 # target_link_libraries(independence_check_test wasim)

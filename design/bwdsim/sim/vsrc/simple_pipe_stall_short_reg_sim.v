@@ -6,7 +6,8 @@
 // with only 4 registers
 // for simplicity, we even make the instruction part
 // as input
-// ADD/SUB/AND 2-bit op, 2-bit rs1, 2-bit rs2, 2-bit rd
+// NOP         2-bit op
+// ADD/NAND    2-bit op, 2-bit rs1, 2-bit rs2, 2-bit rd
 // SET         2-bit op, 4bit imm 2-bit rd
 
 // -- ID --|-- EX --|-- WB
@@ -49,10 +50,10 @@ reg [1:0] ex_wb_rd;
 reg       ex_wb_reg_wen;
 
 // reg [7:0] registers[3:0];
-reg [7:0] registers0;
-reg [7:0] registers1;
-reg [7:0] registers2;
-reg [7:0] registers3;
+reg [7:0] registers0/*verilator public*/;
+reg [7:0] registers1/*verilator public*/;
+reg [7:0] registers2/*verilator public*/;
+reg [7:0] registers3/*verilator public*/;
 
 
 // interlocking
@@ -70,7 +71,7 @@ wire ex_go;
 
 reg ex_wb_valid;
 wire wb_ex_ready;
-wire wb_go;
+wire wb_go/*verilator public*/;
 
 
 //
@@ -271,6 +272,15 @@ assign wb_ex_ready = !stallwb;
 assign wb_go = ex_wb_valid && wb_ex_ready;
 
 assign wb_forwarding_val = ex_wb_val;
+
+reg [7:0] wb_out_inst/*verilator public*/;
+reg wb_finish/*verilator public*/;
+
+always @(posedge clk) begin
+	 wb_out_inst <= wb_go ? ex_wb_inst : wb_out_inst;
+	 wb_finish <= wb_go;
+end
+
 
 always @(posedge clk ) begin
    if (wb_go && ex_wb_reg_wen && ex_wb_rd == 0) begin

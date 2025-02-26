@@ -1,10 +1,12 @@
 #include "Vpipeline_v.h"
+#include "Vpipeline_v_pipeline_v.h"
 #include "verilated.h"
 #include "verilated_vcd_c.h"
 #include <iostream>
 #include <string>
 #include <vector>
 #include <cstdint>
+#include <sstream>
 #include <unordered_map>
 
 TOP_NAME* dut;
@@ -52,6 +54,22 @@ std::unordered_map<std::string , uint8_t> reg_index_map = {
   {"a3", 3}
 };
 
+
+std::string inst_type(const std::string&inst) {
+	if(inst.substr(0,3) == "and" ||
+		inst.substr(0,3) == "add" ||
+		inst.substr(0,3) == "set"){
+		return inst.substr(0,3);
+	}
+	else if(inst.substr(0,4) == "nand"){
+		return inst.substr(0,4);
+	}else {
+		std::cerr << "Error Instruction!" <<std::endl;
+	}
+	return "";			
+}
+
+
 std::vector<uint8_t> compile(const std::vector<std::string>& insts) {
   std::vector<uint8_t> insts_ret;
   uint8_t opcode, rs1, rs2, rd, imm;
@@ -84,57 +102,8 @@ std::vector<uint8_t> compile(const std::vector<std::string>& insts) {
   }
   return insts_ret;
 }
-/*
-std::vector<uint8_t> compile(const std::vector<std::string>& insts) {
-  std::vector<uint8_t> insts_ret;
-  uint8_t opcode, rs1, rs2, rd, imm; 
-  size_t i;
-  for(const auto &inst: insts){
-    if(inst == "nop"){
-      insts_ret.push_back(inst_op_map[inst]<<6);
-      continue;
-    }
-    for(i=0; i<inst.size(); i++){
-      if(inst[i] == ' '){
-        opcode = inst_op_map[inst.substr(0, i)];
-        std::cout << inst.substr(0,i) << ": " ;
-        if(inst.substr(0,i) == "add" || inst.substr(0,i) == "nand"){
-          for(int j=i+1; j<inst.size(); j++){
-            if(inst[j] == ','){
-              rs1 = reg_index_map[inst.substr(i+1, j-i-1)];
-              rs2 = reg_index_map[inst.substr(j+1, inst.size()-j-1)];
-              insts_ret.push_back(opcode<<6 | rs1<<4 | rs2);
-              std::cout << opcode << ": rs1: " << rs1 << " rs2: " << rs2 << std::endl;
-              break;
-            }
-          }
 
-        }else if (inst.substr(0,i) == "set"){
-          for(int j=i+1; j<inst.size(); j++){
-            if(inst[j] == ','){
-              rd = reg_index_map[inst.substr(i+1, j-i-1)];
-              imm = std::stoi(inst.substr(j+1, inst.size()-j-1));
-              if(imm > 15){
-                std::cerr << "Compile ERROR: " << inst <<std::endl;
-              insts_ret.push_back(opcode<<6 | rd<<4 | imm);
-              std::cout << opcode << ": rd: " << rs1 << " imm: " << imm << std::endl;
-              break;
-             }
-            }
-          }
-        }else {
-            std::cerr << "Compile ERROR: " << inst <<std::endl;
-        }
-        break;
-      }
-      if( i== inst.size() ){
-        std::cerr << "Compile ERROR: " << inst <<std::endl;
-      }
-    }
-  }
-  return insts_ret;
-}
-*/
+
 void print_bin(const std::vector<uint8_t>& insts){
   for(const auto &inst: insts){
     for(int i=7; i>=0; i--){
@@ -148,6 +117,12 @@ void print_asm(const std::vector<std::string> insts){
   for(const auto &inst: insts){
     std::cout << inst << std::endl;
   }
+}
+
+std::string to_hex(int num) {
+  std::stringstream ss;
+  ss << std::hex << num; 
+	return ss.str();
 }
 
 int main(int argc, char**argv) {
@@ -188,6 +163,19 @@ int main(int argc, char**argv) {
 		while(!dut->inst_ready){
 			single_cycle();
 		}
+		std::cout << "wb_finish: " << (dut->pipeline_v->wb_finish ? "1" : "0") << " at time = " << contextp->time() <<std::endl; 
+		if(dut->pipeline_v->wb_finish){
+			std::cout << "At time = " << contextp->time() << std::endl;
+			std::cout << "Inst: " << "0x" << to_hex(dut->pipeline_v->wb_out_inst) 
+								<< "  " <<std::bitset<8>(dut->pipeline_v->wb_out_inst).to_string() << std::endl;
+			std::cout << "a0: " << "0x" << to_hex(dut->pipeline_v->registers0) << std::endl << 
+							   "a2: " << "0x" << to_hex(dut->pipeline_v->registers1) << std::endl << 
+								 "a3: " << "0x" << to_hex(dut->pipeline_v->registers2) << std::endl << 
+								 "a4: " << "0x" << to_hex(dut->pipeline_v->registers3) << std::endl;
+			std::cout << "-----------------" <<std::endl;
+
+		}
+
 	}
 	
 	for(int i=5; i>=0; --i){

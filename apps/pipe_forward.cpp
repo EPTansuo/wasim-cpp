@@ -25,7 +25,7 @@ int main() {
 
   TransitionSystem sts(solver);
   
-  BTOR2Encoder btor_parser("/home/hongcez/mingkai/pipe/simple_pipe_stall_short_reg.btor2", sts);
+  BTOR2Encoder btor_parser( PROJECT_SOURCE_DIR "/design/bwdsim/simple_pipe_stall_short_reg.btor2", sts);
 
   
   SymbolicSimulator sim(sts, solver);

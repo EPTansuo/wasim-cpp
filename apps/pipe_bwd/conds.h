@@ -295,6 +295,14 @@ public:
       std::cout << " #### " << c->to_string() << std::endl;
     }
   }
+
+  std::string to_string() const {
+    std::string s;
+    for (const auto & c : conds) {
+      s += " #### " + c->to_string() + "\n";
+    }
+    return s;
+  }
 }; // Conditions
 
 } // namespace wasim

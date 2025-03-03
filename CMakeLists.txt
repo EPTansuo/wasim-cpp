@@ -22,12 +22,14 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 add_definitions(-DWASIM_SRC_DIR=${PROJECT_SOURCE_DIR})
 
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall")
+add_compile_options(-fmacro-prefix-map=${PROJECT_SOURCE_DIR}/=)
+
 if(APPLE)
   set(SHARED_LIB_EXT "dylib")
 else()
   set(SHARED_LIB_EXT "so")
 endif()
-
 
 
 if (WITH_PROFILING)
@@ -75,7 +77,12 @@ find_package(GMP REQUIRED)
 
 find_package(GFlags REQUIRED)
 
+find_package(fmt REQUIRED)
+
+find_package(argparse REQUIRED)
+
 set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -L/usr/lib -lunwind") 
+# set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -L/usr/lib -lfmt") 
 
 # Check that dependencies are there
 if (NOT EXISTS "${SMT_SWITCH_DIR}/local/include/smt-switch/smt.h")
@@ -262,9 +269,11 @@ target_link_libraries(test1 wasim-lib gflags)
 add_executable(pipe_forward "apps/pipe_forward.cpp")
 target_link_libraries(pipe_forward wasim-lib gflags)
 
+add_executable(multi_4stage "apps/multi_4stage.cpp")
+target_link_libraries(multi_4stage wasim-lib gflags fmt::fmt-header-only)
 
 add_executable(pipe "apps/pipe.cpp")
-target_link_libraries(pipe wasim-lib gflags)
+target_link_libraries(pipe wasim-lib gflags fmt::fmt-header-only argparse::argparse)
 
 add_executable(p4stage "apps/pipe_4stage.cpp")
 target_link_libraries(p4stage wasim-lib gflags)

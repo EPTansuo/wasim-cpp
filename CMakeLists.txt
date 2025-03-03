@@ -269,9 +269,6 @@ target_link_libraries(test1 wasim-lib gflags)
 add_executable(pipe_forward "apps/pipe_forward.cpp")
 target_link_libraries(pipe_forward wasim-lib gflags)
 
-add_executable(multi_4stage "apps/multi_4stage.cpp")
-target_link_libraries(multi_4stage wasim-lib gflags fmt::fmt-header-only)
-
 add_executable(pipe "apps/pipe.cpp")
 target_link_libraries(pipe wasim-lib gflags fmt::fmt-header-only argparse::argparse)
 

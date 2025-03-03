@@ -79,6 +79,7 @@ find_package(GFlags REQUIRED)
 
 find_package(fmt REQUIRED)
 
+
 find_package(argparse REQUIRED)
 
 set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -L/usr/lib -lunwind") 
@@ -274,6 +275,10 @@ target_link_libraries(pipe wasim-lib gflags fmt::fmt-header-only argparse::argpa
 
 add_executable(smt_switch_demo "apps/smt_switch_demo.cpp")
 target_link_libraries(smt_switch_demo wasim-lib fmt::fmt-header-only)
+
+
+add_executable(pipe_isaspec "apps/pipe_isaspec.cpp")
+target_link_libraries(pipe_isaspec wasim-lib gflags fmt::fmt-header-only pstring)
 
 add_executable(p4stage "apps/pipe_4stage.cpp")
 target_link_libraries(p4stage wasim-lib gflags)

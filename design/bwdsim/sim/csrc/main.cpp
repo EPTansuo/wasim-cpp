@@ -144,6 +144,8 @@ int main(int argc, char**argv) {
     "set a1,3",
     "add a2,a0,a1",
 		"add a2,a2,a1",
+		"nop",
+		"nop",
 		"set a2,10",
 		"add a2,a2,a1",
     "nop"    

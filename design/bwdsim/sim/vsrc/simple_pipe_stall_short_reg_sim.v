@@ -273,7 +273,9 @@ assign wb_go = ex_wb_valid && wb_ex_ready;
 
 assign wb_forwarding_val = ex_wb_val;
 
+(* keep *)
 reg [7:0] wb_out_inst/*verilator public*/;
+(* keep *)
 reg wb_finish/*verilator public*/;
 
 always @(posedge clk) begin

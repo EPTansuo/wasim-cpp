@@ -21,6 +21,7 @@ fmt::print( __fmt__ + std::string("\n"), ##__VA_ARGS__)
 
 
 #define LOG_DEBUG(__fmt, ...) \
-fmt::print(fmt::fg(fmt::color::blue_violet), "[DEBUG]: "); \
+fmt::print(fmt::fg(fmt::color::blue_violet), "[DEBUG]: ");\
 fmt::print(fmt::fg(fmt::color::green), "[{}:{},{}] ", __FILE__, __LINE__, __func__);\
-fmt::print(__fmt + std::string("\n"), ##__VA_ARGS__)
+fmt::print(__fmt + std::string("\n"), ##__VA_ARGS__); \
+fflush(stdout);

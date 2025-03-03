@@ -3,10 +3,14 @@
 // For this checking, no extra environmental invariants are needed
 // but for the 4-stage pipe, it is needed
 #include <chrono>
+#include <unordered_map>
+#include "apps/debug.h"
 #include "assert.h"
 #include "config/testpath.h"
 #include "frontend/btor2_encoder.h"
 #include "apps/pipe_bwd/conds.h"
+#include "smt-switch/smt_defs.h"
+#include "smt-switch/solver.h"
 
 
 using namespace wasim;
@@ -91,6 +95,46 @@ bool TransCheck(const Conds & c1, const TermVec & transcond, const Conds & c2, T
   return succ;
 }
 
+Term make_term_tranversed(SmtSolver & target_solver,
+                          const Term & source_term,
+                          std::unordered_set<std::string>& symbol_names) {
+  if (source_term->is_symbol()) {
+    const std::string & name = source_term->to_string();
+    if (symbol_names.find(name) != symbol_names.end()) {
+      return target_solver->get_symbol(name);
+    }
+    Sort sort = source_term->get_sort();
+    Sort target_sort = target_solver->make_sort(sort->get_sort_kind(), sort->get_width());
+    Term new_symbol = target_solver->make_symbol(name, target_sort);
+    symbol_names.insert(name);
+    return new_symbol;
+  } else if (source_term->is_value()) {
+    Sort sort = source_term->get_sort();
+    Sort target_sort = target_solver->make_sort(sort->get_sort_kind(), sort->get_width());
+    if (sort->get_sort_kind() == BV) {
+      return target_solver->make_term(source_term->to_int(), target_sort);
+    }  else {
+      throw std::runtime_error("Unsupported sort kind");
+    }
+  } else {
+    TermVec new_children;
+    for (auto it = source_term->begin(); it != source_term->end(); ++it) {
+      new_children.push_back(make_term_tranversed(target_solver, *it, symbol_names));
+    }
+    Op op = source_term->get_op();
+    return target_solver->make_term(op, new_children);
+  }
+}
+
+void print_term_type_transerved(const Term & t) {
+  LOG_DEBUG("{} is_symbol:         {}", t->to_string(),  t->is_symbol());
+  LOG_DEBUG("{} is_value:          {}", t->to_string(),  t->is_value());
+  LOG_DEBUG("{} is_symbolic_const: {}", t->to_string(),  t->is_symbolic_const());
+  LOG_DEBUG("{} is_param:          {}", t->to_string(), t->is_param());
+  for (auto it = t->begin(); it != t->end(); ++it) {
+    print_term_type_transerved(*it);
+  }
+}
 
 int main() {
 
@@ -177,6 +221,49 @@ int main() {
   //   TODO 1: integrate model checking!!!
   //   TODO 2: add another check to certify the simulation result
   //   TODO 3: maybe integrate with certifaiger
+
+  auto C = IfIdState.conds[0];
+  auto D = IfIdState.conds[1];
+
+  SmtSolver s = BoolectorSolverFactory::create(false);;
+  s->set_logic("QF_UFBV");
+  s->set_opt("incremental", "true");
+  s->set_opt("produce-models", "true");
+  s->set_opt("produce-unsat-assumptions", "true");
+
+  LOG_DEBUG("{}", (*D->begin())->to_string());
+  LOG_DEBUG("{}", ((*D->begin()))->get_sort()->to_string());
+  LOG_DEBUG("{}", ((*D->begin()))->to_int());
+
+  auto sort =  ((*D->begin()))->get_sort();
+  auto value =  ((*D->begin()))->to_int();
+ 
+  
+  assert(value == 1);
+  
+  auto sk = sort->get_sort_kind();
+  LOG_DEBUG("sk: {}", to_string(sk));
+  auto width = sort->get_width();
+  LOG_DEBUG("width: {}", width);
+  assert(s != nullptr);
+
+  std::unordered_set<std::string> symbol_names;
+  auto D_tosolve = make_term_tranversed(s, D, symbol_names);
+  
+
+  auto C_tosolve = make_term_tranversed(s, C, symbol_names);
+  std::cout << "C_tosolve: " << C_tosolve->to_string() << std::endl;
+  std::cout << "D_tosolve: " << D_tosolve->to_string() << std::endl;
+  auto tosolve = s->make_term(Implies, D_tosolve, C_tosolve);
+  LOG_DEBUG("tosolve:{}", tosolve->to_string())
+
+  s->push();
+  s->assert_formula(tosolve);
+  std::cout << "Model checking: " << s->check_sat() << std::endl;
+  s->pop();
+
+
+
   return 0;
 
 }

@@ -272,6 +272,9 @@ target_link_libraries(pipe_forward wasim-lib gflags)
 add_executable(pipe "apps/pipe.cpp")
 target_link_libraries(pipe wasim-lib gflags fmt::fmt-header-only argparse::argparse)
 
+add_executable(smt_switch_demo "apps/smt_switch_demo.cpp")
+target_link_libraries(smt_switch_demo wasim-lib fmt::fmt-header-only)
+
 add_executable(p4stage "apps/pipe_4stage.cpp")
 target_link_libraries(p4stage wasim-lib gflags)
 

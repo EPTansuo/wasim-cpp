@@ -137,8 +137,9 @@ void print_term_type_transerved(const Term & t) {
 }
 
 int main() {
-  PString str = "Hello World!";
-  std::cout << str << std::endl;
+  // PString str = "Hello World!";
+  // std::cout << str << std::endl;
+  // LOG_DEBUG("{}",fe(str));
 
   SmtSolver solver = BoolectorSolverFactory::create(false);
 
